@@ -560,7 +560,9 @@ class Discriminator(nn.Module):
 
         self.n_layer = len(self.progression)
 
-        self.linear = EqualLinear(512, max(1, label_dim))
+        self.linear = EqualLinear(512, 1)
+        if label_dim > 0:
+            self.linear_label = EqualLinear(512, label_dim)
 
     def forward(self, input, label=None, step=0, alpha=-1):
         for i in range(step, -1, -1):
@@ -586,11 +588,13 @@ class Discriminator(nn.Module):
 
         out = out.squeeze(2).squeeze(2)
         # print(input.size(), out.size(), step)
-        out = self.linear(out)
+        out_d = self.linear(out)
         
         # conditional based on label
-        # label should be one-hot
+        # label can be one-hot (SoftmaxCrossEntropy Loss) or weights vector (MSE Loss).
         if label is not None:
-            out = (out*label).sum(dim=1, keepdim=True)
-            
-        return out
+            out_label = self.linear_label(out)
+            return out_d, out_label
+        
+        else:
+            return out_d

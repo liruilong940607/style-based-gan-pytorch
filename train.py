@@ -42,7 +42,7 @@ def adjust_lr(optimizer, lr):
         mult = group.get('mult', 1)
         group['lr'] = lr * mult
 
-
+        
 def train(args, dataset, generator, discriminator):
     step = int(math.log2(args.init_size)) - 2
     resolution = 4 * 2 ** step
@@ -62,6 +62,7 @@ def train(args, dataset, generator, discriminator):
     disc_loss_val = 0
     gen_loss_val = 0
     grad_loss_val = 0
+    label_loss_val = 0
 
     alpha = 0
     used_sample = 0
@@ -117,7 +118,7 @@ def train(args, dataset, generator, discriminator):
                 label = None
             else:
                 real_image, label_int = next(data_loader)
-                label = F.one_hot(label_int, num_classes=label_size).float()
+                real_label = F.one_hot(label_int, num_classes=label_size).float()
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
@@ -126,7 +127,9 @@ def train(args, dataset, generator, discriminator):
                 label = None
             else:
                 real_image, label_int = next(data_loader)
-                label = F.one_hot(label_int, num_classes=label_size).float()
+                real_label = F.one_hot(label_int, num_classes=label_size).float()
+                
+        assert real_label is not None
 
         used_sample += real_image.shape[0]
 
@@ -134,11 +137,14 @@ def train(args, dataset, generator, discriminator):
         real_image = real_image.cuda()
 
         if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image, label, step=step, alpha=alpha)
+            real_predict, real_predictL = discriminator(real_image, real_label, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
+            real_predictL = MSELoss(real_predictL, real_label)
+            real_predictL.backward()
 
-        elif args.loss == 'r1':
+        elif args.loss == 'r1': # Can't use. Not Implement Conditional
+            raise NotImplementedError
             real_image.requires_grad = True
             real_scores = discriminator(real_image, label, step=step, alpha=alpha)
             real_predict = F.softplus(-real_scores).mean()
@@ -168,17 +174,26 @@ def train(args, dataset, generator, discriminator):
             gen_in1 = gen_in1.squeeze(0)
             gen_in2 = gen_in2.squeeze(0)
 
-        fake_image = generator(gen_in1, label, step=step, alpha=alpha)
-        fake_predict = discriminator(fake_image, label, step=step, alpha=alpha)
+        # hard code. label range is [0, 6.8], centralize at 0.
+        fake_label1, fake_label2 = torch.randn(2, b_size, label_size, device='cuda').clamp(0, 6.8).chunk(
+            2, 0
+        )
+        fake_label1 = gen_in1.squeeze(0)
+        fake_label2 = gen_in2.squeeze(0)
+            
+        fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
+        fake_predict, fake_predictL = discriminator(fake_image, fake_label1, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
             fake_predict.backward()
+            fake_predictL = MSELoss(fake_predictL, fake_label1)
+            fake_predictL.backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, label, step=step, alpha=alpha)
+            hat_predict = discriminator(x_hat, fake_label, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -190,7 +205,8 @@ def train(args, dataset, generator, discriminator):
             grad_loss_val = grad_penalty.item()
             disc_loss_val = (real_predict - fake_predict).item()
 
-        elif args.loss == 'r1':
+        elif args.loss == 'r1': # Can't use. Not Implement Conditional
+            raise NotImplementedError
             fake_predict = F.softplus(fake_predict).mean()
             fake_predict.backward()
             disc_loss_val = (real_predict + fake_predict).item()
@@ -203,14 +219,16 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, True)
             requires_grad(discriminator, False)
 
-            fake_image = generator(gen_in2, label, step=step, alpha=alpha)
+            fake_image = generator(gen_in2, fake_label2, step=step, alpha=alpha)
 
-            predict = discriminator(fake_image, label, step=step, alpha=alpha)
+            predict, predictL = discriminator(fake_image, fake_label2, step=step, alpha=alpha)
 
             if args.loss == 'wgan-gp':
-                loss = -predict.mean()
+                predictL = MSELoss(predictL, fake_label2)
+                loss = -predict.mean() + predictL
 
-            elif args.loss == 'r1':
+            elif args.loss == 'r1': # Can't use. Not Implement Conditional
+                raise NotImplementedError
                 loss = F.softplus(-predict).mean()
 
             gen_loss_val = loss.item()
@@ -248,9 +266,11 @@ def train(args, dataset, generator, discriminator):
                 g_running.state_dict(), f'checkpoint/{str(i + 1).zfill(6)}.model'
             )
 
+        label_loss_val = (real_predictL + fake_predictL + predictL).item() / 3
+            
         state_msg = (
             f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}'
+            f' Grad: {grad_loss_val:.3f} Label: {label_loss_val:.3f}; Alpha: {alpha:.5f}'
         )
 
         pbar.set_description(state_msg)
@@ -258,7 +278,7 @@ def train(args, dataset, generator, discriminator):
 
 if __name__ == '__main__':
     code_size = 512
-    label_size = 10
+    label_size = 51
     batch_size = 16
     n_critic = 1
 
@@ -318,6 +338,8 @@ if __name__ == '__main__':
     d_optimizer = optim.Adam(discriminator.parameters(), lr=args.lr, betas=(0.0, 0.99))
 
     accumulate(g_running, generator.module, 0)
+    
+    MSELoss = nn.MSELoss()
 
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
