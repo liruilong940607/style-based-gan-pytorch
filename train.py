@@ -112,11 +112,21 @@ def train(args, dataset, generator, discriminator):
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
 
         try:
-            real_image = next(data_loader)
+            if label_size == 0:
+                real_image = next(data_loader)
+                label = None
+            else:
+                real_image, label_int = next(data_loader)
+                label = F.one_hot(label_int, num_classes=label_size).float()
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
-            real_image = next(data_loader)
+            if label_size == 0:
+                real_image = next(data_loader)
+                label = None
+            else:
+                real_image, label_int = next(data_loader)
+                label = F.one_hot(label_int, num_classes=label_size).float()
 
         used_sample += real_image.shape[0]
 
@@ -124,13 +134,13 @@ def train(args, dataset, generator, discriminator):
         real_image = real_image.cuda()
 
         if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image, step=step, alpha=alpha)
+            real_predict = discriminator(real_image, label, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
 
         elif args.loss == 'r1':
             real_image.requires_grad = True
-            real_scores = discriminator(real_image, step=step, alpha=alpha)
+            real_scores = discriminator(real_image, label, step=step, alpha=alpha)
             real_predict = F.softplus(-real_scores).mean()
             real_predict.backward(retain_graph=True)
 
@@ -158,8 +168,8 @@ def train(args, dataset, generator, discriminator):
             gen_in1 = gen_in1.squeeze(0)
             gen_in2 = gen_in2.squeeze(0)
 
-        fake_image = generator(gen_in1, step=step, alpha=alpha)
-        fake_predict = discriminator(fake_image, step=step, alpha=alpha)
+        fake_image = generator(gen_in1, label, step=step, alpha=alpha)
+        fake_predict = discriminator(fake_image, label, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
@@ -168,7 +178,7 @@ def train(args, dataset, generator, discriminator):
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, step=step, alpha=alpha)
+            hat_predict = discriminator(x_hat, label, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -193,9 +203,9 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, True)
             requires_grad(discriminator, False)
 
-            fake_image = generator(gen_in2, step=step, alpha=alpha)
+            fake_image = generator(gen_in2, label, step=step, alpha=alpha)
 
-            predict = discriminator(fake_image, step=step, alpha=alpha)
+            predict = discriminator(fake_image, label, step=step, alpha=alpha)
 
             if args.loss == 'wgan-gp':
                 loss = -predict.mean()
@@ -248,6 +258,7 @@ def train(args, dataset, generator, discriminator):
 
 if __name__ == '__main__':
     code_size = 512
+    label_size = 10
     batch_size = 16
     n_critic = 1
 
@@ -285,11 +296,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
+    generator = nn.DataParallel(StyledGenerator(code_size, label_size)).cuda()
     discriminator = nn.DataParallel(
-        Discriminator(from_rgb_activate=not args.no_from_rgb_activate)
+        Discriminator(label_size, from_rgb_activate=not args.no_from_rgb_activate)
     ).cuda()
-    g_running = StyledGenerator(code_size).cuda()
+    g_running = StyledGenerator(code_size, label_size).cuda()
     g_running.train(False)
 
     class_loss = nn.CrossEntropyLoss()

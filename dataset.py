@@ -2,6 +2,7 @@ from io import BytesIO
 
 import lmdb
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 
 
@@ -36,5 +37,8 @@ class MultiResolutionDataset(Dataset):
         buffer = BytesIO(img_bytes)
         img = Image.open(buffer)
         img = self.transform(img)
+        
+        # fake label, start from 0.
+        label = torch.tensor(3, dtype=torch.int32)
 
         return img

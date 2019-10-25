@@ -452,21 +452,28 @@ class Generator(nn.Module):
 
 
 class StyledGenerator(nn.Module):
-    def __init__(self, code_dim=512, n_mlp=8):
+    def __init__(self, code_dim=512, label_dim=0, n_mlp=8):
         super().__init__()
 
         self.generator = Generator(code_dim)
 
-        layers = [PixelNorm()]
+        self.input = PixelNorm()
+        if label_dim > 0:
+            self.label = EqualLinear(label_dim, label_dim)
+            
+        layers = []
         for i in range(n_mlp):
-            layers.append(EqualLinear(code_dim, code_dim))
+            if i == 0:
+                layers.append(EqualLinear(code_dim+label_dim, code_dim))
+            else:
+                layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
-
         self.style = nn.Sequential(*layers)
 
     def forward(
         self,
         input,
+        label=None,
         noise=None,
         step=0,
         alpha=-1,
@@ -479,7 +486,11 @@ class StyledGenerator(nn.Module):
             input = [input]
 
         for i in input:
-            styles.append(self.style(i))
+            if label is not None:
+                latent_code = torch.cat([self.input(i), self.label(label)], dim=1)
+            else:
+                latent_code = self.input(i)
+            styles.append(self.style(latent_code))
 
         batch = input[0].shape[0]
 
@@ -507,7 +518,7 @@ class StyledGenerator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, fused=True, from_rgb_activate=False):
+    def __init__(self, label_dim=0, fused=True, from_rgb_activate=False):
         super().__init__()
 
         self.progression = nn.ModuleList(
@@ -549,9 +560,9 @@ class Discriminator(nn.Module):
 
         self.n_layer = len(self.progression)
 
-        self.linear = EqualLinear(512, 1)
+        self.linear = EqualLinear(512, max(1, label_dim))
 
-    def forward(self, input, step=0, alpha=-1):
+    def forward(self, input, label=None, step=0, alpha=-1):
         for i in range(step, -1, -1):
             index = self.n_layer - i - 1
 
@@ -576,5 +587,10 @@ class Discriminator(nn.Module):
         out = out.squeeze(2).squeeze(2)
         # print(input.size(), out.size(), step)
         out = self.linear(out)
-
+        
+        # conditional based on label
+        # label should be one-hot
+        if label is not None:
+            out = (out*label).sum(dim=1, keepdim=True)
+            
         return out
