@@ -41,4 +41,4 @@ class MultiResolutionDataset(Dataset):
         # fake label, start from 0.
         label = torch.tensor(3, dtype=torch.int32)
 
-        return img
+        return img, label
