@@ -105,3 +105,4 @@ venv.bak/
 
 *.lmdb
 data/
+sample/

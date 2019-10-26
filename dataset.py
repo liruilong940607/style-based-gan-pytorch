@@ -37,9 +37,12 @@ class MultiResolutionDataset(Dataset):
             img = np.frombuffer(img, dtype=np.float32)
             img = img.reshape(self.resolution, self.resolution, 3)
             
+            key = f'{self.resolution}-{str(index).zfill(5)}-weight'.encode('utf-8')
+            weight = txn.get(key)
+            weight = np.frombuffer(weight, dtype=np.float32)
+            weight = weight.reshape((51,))
+            
         img = torch.from_numpy(img.transpose(2, 0, 1)).float()
-        
-        # fake label, start from 0.
-        label = torch.tensor(3, dtype=torch.int32)
+        label = torch.from_numpy(weight).float() / 6.8
 
         return img, label

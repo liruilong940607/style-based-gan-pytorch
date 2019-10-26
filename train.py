@@ -15,7 +15,7 @@ from torchvision import datasets, transforms, utils
 
 from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
-
+import imageio
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -114,20 +114,18 @@ def train(args, dataset, generator, discriminator):
 
         try:
             if label_size == 0:
+                raise NotImplementedError
                 real_image = next(data_loader)
-                label = None
             else:
-                real_image, label_int = next(data_loader)
-                real_label = F.one_hot(label_int, num_classes=label_size).float()
+                real_image, real_label = next(data_loader)
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
             if label_size == 0:
+                raise NotImplementedError
                 real_image = next(data_loader)
-                label = None
             else:
-                real_image, label_int = next(data_loader)
-                real_label = F.one_hot(label_int, num_classes=label_size).float()
+                real_image, real_label = next(data_loader)
                 
         assert real_label is not None
 
@@ -135,13 +133,13 @@ def train(args, dataset, generator, discriminator):
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
+        real_label = real_label.cuda()
 
         if args.loss == 'wgan-gp':
             real_predict, real_predictL = discriminator(real_image, real_label, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
-            (-real_predict).backward()
             real_predictL = MSELoss(real_predictL, real_label)
-            real_predictL.backward()
+            (-real_predict + real_predictL).backward()
 
         elif args.loss == 'r1': # Can't use. Not Implement Conditional
             raise NotImplementedError
@@ -175,25 +173,24 @@ def train(args, dataset, generator, discriminator):
             gen_in2 = gen_in2.squeeze(0)
 
         # hard code. label range is [0, 6.8], centralize at 0.
-        fake_label1, fake_label2 = torch.randn(2, b_size, label_size, device='cuda').clamp(0, 6.8).chunk(
+        fake_label1, fake_label2 = torch.randn(2, b_size, label_size, device='cuda').clamp(0, 1).chunk(
             2, 0
         )
-        fake_label1 = gen_in1.squeeze(0)
-        fake_label2 = gen_in2.squeeze(0)
+        fake_label1 = fake_label1.squeeze(0)
+        fake_label2 = fake_label2.squeeze(0)
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
         fake_predict, fake_predictL = discriminator(fake_image, fake_label1, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
-            fake_predict.backward()
             fake_predictL = MSELoss(fake_predictL, fake_label1)
-            fake_predictL.backward()
+            (fake_predict + fake_predictL).backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, fake_label, step=step, alpha=alpha)
+            hat_predict, _ = discriminator(x_hat, fake_label1, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -224,14 +221,15 @@ def train(args, dataset, generator, discriminator):
             predict, predictL = discriminator(fake_image, fake_label2, step=step, alpha=alpha)
 
             if args.loss == 'wgan-gp':
+                predict = predict.mean()
                 predictL = MSELoss(predictL, fake_label2)
-                loss = -predict.mean() + predictL
+                loss = (-predict) + predictL
 
             elif args.loss == 'r1': # Can't use. Not Implement Conditional
                 raise NotImplementedError
                 loss = F.softplus(-predict).mean()
 
-            gen_loss_val = loss.item()
+            gen_loss_val = (-predict).item()
 
             loss.backward()
             g_optimizer.step()
@@ -240,30 +238,35 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 100 == 0:
-            images = []
-
-            gen_i, gen_j = args.gen_sample.get(resolution, (10, 5))
-
+        if (i + 1) % 500 == 0:
+            gen_i, gen_j = args.gen_sample.get(resolution, (5, 1))
+            latent_code = torch.randn(gen_j, code_size).cuda()
             with torch.no_grad():
-                for _ in range(gen_i):
-                    images.append(
-                        g_running(
-                            torch.randn(gen_j, code_size).cuda(), step=step, alpha=alpha
-                        ).data.cpu()
-                    )
+                for idx in range(gen_i):
+                    label_code = torch.zeros(gen_j, label_size).cuda()
+                    label_code[:, 24] = 0.2 * (idx + 1)
+                    image = g_running(
+                        latent_code, label_code, step=step, alpha=alpha
+                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+                    
+                    label_code = torch.zeros(gen_j, label_size).cuda()
+                    label_code[:, 26] = 0.2 * (idx + 1)
+                    image = g_running(
+                        latent_code, label_code, step=step, alpha=alpha
+                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
 
-            utils.save_image(
-                torch.cat(images, 0),
-                f'sample/{str(i + 1).zfill(6)}.png',
-                nrow=gen_i,
-                normalize=True,
-                range=(-1, 1),
-            )
-
-        if (i + 1) % 10000 == 0:
+        if (i + 1) % 1000 == 0:
             torch.save(
-                g_running.state_dict(), f'checkpoint/{str(i + 1).zfill(6)}.model'
+                {
+                    'generator': generator.module.state_dict(),
+                    'discriminator': discriminator.module.state_dict(),
+                    'g_optimizer': g_optimizer.state_dict(),
+                    'd_optimizer': d_optimizer.state_dict(),
+                    'g_running': g_running.state_dict(),
+                },
+                f'checkpoint/train_iter-{i}.model',
             )
 
         label_loss_val = (real_predictL + fake_predictL + predictL).item() / 3

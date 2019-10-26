@@ -9,15 +9,16 @@ from tqdm import tqdm
 from torchvision import datasets
 from torchvision.transforms import functional as trans_fn
 
+import cv2
+import imageio
+import scipy.io
+import glob
+import os
+import numpy as np
 
 def resize_and_convert(img, size, quality=100):
-    img = trans_fn.resize(img, size, Image.LANCZOS)
-    img = trans_fn.center_crop(img, size)
-    buffer = BytesIO()
-    img.save(buffer, format='jpeg', quality=quality)
-    val = buffer.getvalue()
-
-    return val
+    img = cv2.resize(img, (size, size), interpolation=cv2.INTER_CUBIC)
+    return img.tobytes()
 
 
 def resize_multiple(img, sizes=(8, 16, 32, 64, 128, 256, 512, 1024), quality=100):
@@ -25,31 +26,33 @@ def resize_multiple(img, sizes=(8, 16, 32, 64, 128, 256, 512, 1024), quality=100
 
     for size in sizes:
         imgs.append(resize_and_convert(img, size, quality))
-
+        
     return imgs
 
 
 def resize_worker(img_file, sizes):
-    i, file = img_file
-    img = Image.open(file)
-    img = img.convert('RGB')
+    i, file, wfile = img_file
+    img = imageio.imread(file, format='EXR-FI')
     out = resize_multiple(img, sizes=sizes)
 
-    return i, out
+    weight = scipy.io.loadmat(wfile)["BSweights"][:, 0]
+    weight = np.float32(weight).tobytes()
+    return i, out, weight
 
 
-def prepare(transaction, dataset, n_worker, sizes=(8, 16, 32, 64, 128, 256, 512, 1024)):
+def prepare(transaction, dataset, wset, n_worker, sizes=(8, 16, 32, 64, 128, 256, 512, 1024)):
     resize_fn = partial(resize_worker, sizes=sizes)
 
-    files = sorted(dataset.imgs, key=lambda x: x[0])
-    files = [(i, file) for i, (file, label) in enumerate(files)]
+    files = [(i, file, wfile) for i, (file, wfile) in enumerate(zip(dataset, wset))]
     total = 0
 
     with multiprocessing.Pool(n_worker) as pool:
-        for i, imgs in tqdm(pool.imap_unordered(resize_fn, files)):
+        for i, imgs, weight in tqdm(pool.imap_unordered(resize_fn, files)):
             for size, img in zip(sizes, imgs):
                 key = f'{size}-{str(i).zfill(5)}'.encode('utf-8')
                 transaction.put(key, img)
+                key = f'{size}-{str(i).zfill(5)}-weight'.encode('utf-8')
+                transaction.put(key, weight)
 
             total += 1
 
@@ -60,12 +63,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=str)
     parser.add_argument('--n_worker', type=int, default=8)
-    parser.add_argument('path', type=str)
 
     args = parser.parse_args()
 
-    imgset = datasets.ImageFolder(args.path)
+    path_pointcloud = "/mount/ForRuilong/FaceEncoding_process/1024/PointCloud_Aligned/{}_pointcloud.exr"
+    path_weights = "/mount/ForRuilong/FaceEncoding_process/1024/BlendingWeights/{}_BSweights.mat"
+    
+    wholeset = sorted(glob.glob(path_pointcloud.format("*")))
+    
+    imgset = []
+    wset = []
+    for imgfile in wholeset:
+        wfile = imgfile.replace("PointCloud_Aligned", "BlendingWeights").replace("_pointcloud.exr", "_BSweights.mat")
+        if os.path.exists(wfile):
+            wset.append(wfile)
+            imgset.append(imgfile)
+            
+    print (len(imgset), len(wset))
 
     with lmdb.open(args.out, map_size=1024 ** 4, readahead=False) as env:
         with env.begin(write=True) as txn:
-            prepare(txn, imgset, args.n_worker)
+            prepare(txn, imgset, wset, args.n_worker)
