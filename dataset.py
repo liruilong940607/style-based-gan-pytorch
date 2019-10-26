@@ -4,7 +4,8 @@ import lmdb
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
-
+import numpy as np
+import torch
 
 class MultiResolutionDataset(Dataset):
     def __init__(self, path, transform, resolution=8):
@@ -32,11 +33,11 @@ class MultiResolutionDataset(Dataset):
     def __getitem__(self, index):
         with self.env.begin(write=False) as txn:
             key = f'{self.resolution}-{str(index).zfill(5)}'.encode('utf-8')
-            img_bytes = txn.get(key)
-
-        buffer = BytesIO(img_bytes)
-        img = Image.open(buffer)
-        img = self.transform(img)
+            img = txn.get(key)
+            img = np.frombuffer(img, dtype=np.float32)
+            img = img.reshape(self.resolution, self.resolution, 3)
+            
+        img = torch.from_numpy(img.transpose(2, 0, 1)).float()
         
         # fake label, start from 0.
         label = torch.tensor(3, dtype=torch.int32)
