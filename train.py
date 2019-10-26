@@ -17,6 +17,7 @@ from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 import imageio
 import os
+import time
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -116,6 +117,7 @@ def train(args, dataset, generator, discriminator):
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
 
+        tick = time.time()
         try:
             if label_size == 0:
                 raise NotImplementedError
@@ -130,6 +132,7 @@ def train(args, dataset, generator, discriminator):
                 real_image = next(data_loader)
             else:
                 real_image, real_label = next(data_loader)
+        tock = time.time()
                 
         assert real_label is not None
 
@@ -270,14 +273,14 @@ def train(args, dataset, generator, discriminator):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_iter-{i}.model',
+                f'checkpoint/{args.folder}/train_iter-{i}.model',
             )
 
         label_loss_val = (real_predictL + fake_predictL + predictL).item() / 3
             
         state_msg = (
             f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f} Label: {label_loss_val:.3f}; Alpha: {alpha:.5f}'
+            f' Grad: {grad_loss_val:.3f} Label: {label_loss_val:.3f}; Alpha: {alpha:.5f}; Data: {tock-tick: .3f};'
         )
 
         pbar.set_description(state_msg)
@@ -366,12 +369,16 @@ if __name__ == '__main__':
         ]
     )
 
-    dataset = MultiResolutionDataset(args.path, transform)
+    dataset = MultiResolutionDataset(args.path, transform, args.init_size)
 
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-
+        # 1 GPU
+#         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+#         args.phase = 600_000
+        # 8 GPU
+        args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
+        args.phase = 1200_000
     else:
         args.lr = {}
         args.batch = {}
