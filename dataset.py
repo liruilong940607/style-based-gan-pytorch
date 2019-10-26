@@ -28,9 +28,11 @@ class MultiResolutionDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return self.length
+        return self.length * 1000
 
     def __getitem__(self, index):
+        index = index % self.length
+        
         with self.env.begin(write=False) as txn:
             key = f'{self.resolution}-{str(index).zfill(5)}'.encode('utf-8')
             img = txn.get(key)

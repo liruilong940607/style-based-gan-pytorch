@@ -16,6 +16,7 @@ from torchvision import datasets, transforms, utils
 from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 import imageio
+import os
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -70,6 +71,9 @@ def train(args, dataset, generator, discriminator):
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = False
 
+    os.makedirs(f"checkpoint/{args.folder}/", exist_ok=True)
+    os.makedirs(f"sample/{args.folder}/", exist_ok=True)
+    
     for i in pbar:
         discriminator.zero_grad()
 
@@ -106,7 +110,7 @@ def train(args, dataset, generator, discriminator):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_step-{ckpt_step}.model',
+                f'checkpoint/{args.folder}/train_step-{ckpt_step}.model',
             )
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
@@ -172,7 +176,7 @@ def train(args, dataset, generator, discriminator):
             gen_in1 = gen_in1.squeeze(0)
             gen_in2 = gen_in2.squeeze(0)
 
-        # hard code. label range is [0, 6.8], centralize at 0.
+        # hard code. label range is [0, 1.0], centralize at 0.
         fake_label1, fake_label2 = torch.randn(2, b_size, label_size, device='cuda').clamp(0, 1).chunk(
             2, 0
         )
@@ -248,14 +252,14 @@ def train(args, dataset, generator, discriminator):
                     image = g_running(
                         latent_code, label_code, step=step, alpha=alpha
                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+                    imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
                     
                     label_code = torch.zeros(gen_j, label_size).cuda()
                     label_code[:, 26] = 0.2 * (idx + 1)
                     image = g_running(
                         latent_code, label_code, step=step, alpha=alpha
                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+                    imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
 
         if (i + 1) % 1000 == 0:
             torch.save(
@@ -288,6 +292,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Progressive Growing of GANs')
 
     parser.add_argument('path', type=str, help='path of specified dataset')
+    parser.add_argument('--folder', default="default", type=str, help='experiment folder')
     parser.add_argument(
         '--phase',
         type=int,
