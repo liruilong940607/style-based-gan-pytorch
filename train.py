@@ -16,6 +16,8 @@ from torchvision import datasets, transforms, utils
 from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 
+import imageio
+
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -212,30 +214,27 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 100 == 0:
-            images = []
-
-            gen_i, gen_j = args.gen_sample.get(resolution, (10, 5))
-
+        if (i + 1) % 500 == 0:
+            gen_i, gen_j = args.gen_sample.get(resolution, (1, 1))
+            latent_code = torch.randn(gen_j, code_size).cuda()
             with torch.no_grad():
-                for _ in range(gen_i):
-                    images.append(
-                        g_running(
-                            torch.randn(gen_j, code_size).cuda(), step=step, alpha=alpha
-                        ).data.cpu()
-                    )
+                for idx in range(gen_i):
+                    image = g_running(
+                        latent_code, step=step, alpha=alpha
+                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}.exr', image, format='EXR-FI')
+                    
 
-            utils.save_image(
-                torch.cat(images, 0),
-                f'sample/{str(i + 1).zfill(6)}.png',
-                nrow=gen_i,
-                normalize=True,
-                range=(-1, 1),
-            )
-
-        if (i + 1) % 10000 == 0:
+        if (i + 1) % 3000 == 0:
             torch.save(
-                g_running.state_dict(), f'checkpoint/{str(i + 1).zfill(6)}.model'
+                {
+                    'generator': generator.module.state_dict(),
+                    'discriminator': discriminator.module.state_dict(),
+                    'g_optimizer': g_optimizer.state_dict(),
+                    'd_optimizer': d_optimizer.state_dict(),
+                    'g_running': g_running.state_dict(),
+                },
+                f'checkpoint/train_iter-{i}.model',
             )
 
         state_msg = (
@@ -319,24 +318,30 @@ if __name__ == '__main__':
 
     transform = transforms.Compose(
         [
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
+#             transforms.RandomHorizontalFlip(),
+#             transforms.ToTensor(),
+#             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
         ]
     )
 
     dataset = MultiResolutionDataset(args.path, transform)
 
     if args.sched:
+#         # 1 gpu
+#         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
+#         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+        
+        # 4 gpu
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        args.phase = 1200_000
 
     else:
         args.lr = {}
         args.batch = {}
 
-    args.gen_sample = {512: (8, 4), 1024: (4, 2)}
+    args.gen_sample = {}
 
-    args.batch_default = 32
+    args.batch_default = 128
 
     train(args, dataset, generator, discriminator)

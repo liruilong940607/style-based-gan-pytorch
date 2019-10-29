@@ -3,7 +3,8 @@ from io import BytesIO
 import lmdb
 from PIL import Image
 from torch.utils.data import Dataset
-
+import numpy as np
+import torch
 
 class MultiResolutionDataset(Dataset):
     def __init__(self, path, transform, resolution=8):
@@ -26,15 +27,17 @@ class MultiResolutionDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        return self.length
+        return self.length * 10000
 
     def __getitem__(self, index):
+        index = index % self.length
+        
         with self.env.begin(write=False) as txn:
             key = f'{self.resolution}-{str(index).zfill(5)}'.encode('utf-8')
-            img_bytes = txn.get(key)
-
-        buffer = BytesIO(img_bytes)
-        img = Image.open(buffer)
-        img = self.transform(img)
+            img = txn.get(key)
+            img = np.frombuffer(img, dtype=np.float32)
+            img = img.reshape(self.resolution, self.resolution, 3)
+            
+        img = torch.from_numpy(img.transpose(2, 0, 1)).float()
 
         return img
