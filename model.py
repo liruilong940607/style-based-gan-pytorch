@@ -459,12 +459,12 @@ class StyledGenerator(nn.Module):
 
         self.input = PixelNorm()
         if label_dim > 0:
-            self.label = EqualLinear(label_dim, label_dim)
+            self.label = EqualLinear(label_dim, code_dim)
             
         layers = []
         for i in range(n_mlp):
             if i == 0:
-                layers.append(EqualLinear(code_dim+label_dim, code_dim))
+                layers.append(EqualLinear(code_dim+code_dim, code_dim))
             else:
                 layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
@@ -518,7 +518,7 @@ class StyledGenerator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, label_dim=0, fused=True, from_rgb_activate=False):
+    def __init__(self, label_dim=0, fused=True, from_rgb_activate=False, in_channel=3):
         super().__init__()
 
         self.progression = nn.ModuleList(
@@ -537,10 +537,10 @@ class Discriminator(nn.Module):
 
         def make_from_rgb(out_channel):
             if from_rgb_activate:
-                return nn.Sequential(EqualConv2d(3, out_channel, 1), nn.LeakyReLU(0.2))
+                return nn.Sequential(EqualConv2d(in_channel, out_channel, 1), nn.LeakyReLU(0.2))
 
             else:
-                return EqualConv2d(3, out_channel, 1)
+                return EqualConv2d(in_channel, out_channel, 1)
 
         self.from_rgb = nn.ModuleList(
             [
@@ -594,6 +594,7 @@ class Discriminator(nn.Module):
         # label can be one-hot (SoftmaxCrossEntropy Loss) or weights vector (MSE Loss).
         if label is not None:
             out_label = self.linear_label(out)
+#             out_label = F.sigmoid(out_label)
             return out_d, out_label
         
         else:

@@ -18,6 +18,7 @@ from model import StyledGenerator, Discriminator
 import imageio
 import os
 import time
+import random
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -73,8 +74,8 @@ def train(args, dataset, generator, discriminator):
     final_progress = False
 
     os.makedirs(f"checkpoint/{args.folder}/", exist_ok=True)
-    os.makedirs(f"sample/{args.folder}/", exist_ok=True)
-    
+    os.makedirs(f"sample/{args.folder}/", exist_ok=True)\
+        
     for i in pbar:
         discriminator.zero_grad()
 
@@ -145,7 +146,7 @@ def train(args, dataset, generator, discriminator):
         if args.loss == 'wgan-gp':
             real_predict, real_predictL = discriminator(real_image, real_label, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
-            real_predictL = MSELoss(real_predictL, real_label)
+            real_predictL = MSELoss(real_predictL, real_label) 
             (-real_predict + real_predictL).backward()
 
         elif args.loss == 'r1': # Can't use. Not Implement Conditional
@@ -180,18 +181,22 @@ def train(args, dataset, generator, discriminator):
             gen_in2 = gen_in2.squeeze(0)
 
         # hard code. label range is [0, 1.0], centralize at 0.
-        fake_label1, fake_label2 = torch.randn(2, b_size, label_size, device='cuda').clamp(0, 1).chunk(
-            2, 0
-        )
-        fake_label1 = fake_label1.squeeze(0)
-        fake_label2 = fake_label2.squeeze(0)
+#         fake_label1, fake_label2 = torch.rand(2, b_size, label_size, device='cuda').clamp(0, 1).chunk(
+#             2, 0
+#         )
+#         fake_label1 = fake_label1.squeeze(0)
+#         fake_label2 = fake_label2.squeeze(0)
+        fake_label1 = random.choices(dataset.labels, k=b_size)
+        fake_label1 = torch.stack([label[1] for label in fake_label1]).cuda()
+        fake_label2 = random.choices(dataset.labels, k=b_size)
+        fake_label2 = torch.stack([label[1] for label in fake_label2]).cuda()
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
         fake_predict, fake_predictL = discriminator(fake_image, fake_label1, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
-            fake_predictL = MSELoss(fake_predictL, fake_label1)
+            fake_predictL = MSELoss(fake_predictL, fake_label1) 
             (fake_predict + fake_predictL).backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
@@ -229,7 +234,7 @@ def train(args, dataset, generator, discriminator):
 
             if args.loss == 'wgan-gp':
                 predict = predict.mean()
-                predictL = MSELoss(predictL, fake_label2)
+                predictL = MSELoss(predictL, fake_label2) 
                 loss = (-predict) + predictL
 
             elif args.loss == 'r1': # Can't use. Not Implement Conditional
@@ -250,19 +255,26 @@ def train(args, dataset, generator, discriminator):
             latent_code = torch.randn(gen_j, code_size).cuda()
             with torch.no_grad():
                 for idx in range(gen_i):
-                    label_code = torch.zeros(gen_j, label_size).cuda()
-                    label_code[:, 24] = 0.2 * (idx + 1)
+                    label_file, label_code = dataset.labels[idx]
+                    label_code = torch.stack([label_code for _ in range(gen_j)]).cuda()
                     image = g_running(
                         latent_code, label_code, step=step, alpha=alpha
                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-                    imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+                    imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-{label_file.split("/")[-1]}.exr', image, format='EXR-FI')
                     
-                    label_code = torch.zeros(gen_j, label_size).cuda()
-                    label_code[:, 26] = 0.2 * (idx + 1)
-                    image = g_running(
-                        latent_code, label_code, step=step, alpha=alpha
-                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
-                    imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+#                     label_code = torch.zeros(gen_j, label_size).cuda()
+#                     label_code[:, 4] = 0.2 * (idx + 1)
+#                     image = g_running(
+#                         latent_code, label_code, step=step, alpha=alpha
+#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
+#                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
+                    
+#                     label_code = torch.zeros(gen_j, label_size).cuda()
+#                     label_code[:, 5] = 0.2 * (idx + 1)
+#                     image = g_running(
+#                         latent_code, label_code, step=step, alpha=alpha
+#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
+#                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
 
         if (i + 1) % 1000 == 0:
             torch.save(
@@ -280,7 +292,8 @@ def train(args, dataset, generator, discriminator):
             
         state_msg = (
             f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f} Label: {label_loss_val:.3f}; Alpha: {alpha:.5f}; Data: {tock-tick: .3f};'
+            f' Grad: {grad_loss_val:.3f} Label-R: {real_predictL.item():.3f}; Label-F: {fake_predictL.item():.3f};'
+            f' Alpha: {alpha:.5f}; Data: {tock-tick: .3f};'
         )
 
         pbar.set_description(state_msg)
@@ -288,7 +301,7 @@ def train(args, dataset, generator, discriminator):
 
 if __name__ == '__main__':
     code_size = 512
-    label_size = 51
+    label_size = 9
     batch_size = 16
     n_critic = 1
 
@@ -374,11 +387,16 @@ if __name__ == '__main__':
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # 1 GPU
-#         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-#         args.phase = 600_000
+        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+        args.phase = 600_000
+        
+#         # 6 GPU
+#         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
+#         args.phase = 1200_000
+        
         # 8 GPU
-        args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
-        args.phase = 1200_000
+#         args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
+#         args.phase = 1200_000
     else:
         args.lr = {}
         args.batch = {}
