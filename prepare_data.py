@@ -84,7 +84,8 @@ if __name__ == '__main__':
     path_pointcloud = "/mount/ForRuilong/FaceEncoding_process/1024/PointCloud_Aligned/{}_pointcloud.exr"
     
     wholeset = sorted(glob.glob(path_pointcloud.format("*")))
-    wholeset = [f for f in wholeset if "_01_" not in f]
+    if args.exclude_neutral:
+        wholeset = [f for f in wholeset if "_01_" not in f]
     
     imgset = []
     wset = []
