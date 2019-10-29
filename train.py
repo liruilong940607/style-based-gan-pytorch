@@ -19,6 +19,8 @@ import imageio
 import os
 import time
 import random
+import glob
+import cv2
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -197,7 +199,8 @@ def train(args, dataset, generator, discriminator):
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
             fake_predictL = MSELoss(fake_predictL, fake_label1) 
-            (fake_predict + fake_predictL).backward()
+            # (fake_predict + fake_predictL).backward()
+            (fake_predict).backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
@@ -250,16 +253,27 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 500 == 0:
+        if (i + 1) % 200 == 0:
+            
+            neutral_files = "/mount/ForRuilong/FaceEncoding_process/1024/PointCloud_Aligned/*_01_pointcloud.exr"
+            neutral_files = sorted(glob.glob(neutral_files))
+            neutral_img = imageio.imread(neutral_files[0], format='EXR-FI')
+            neutral_img = cv2.resize(neutral_img, (resolution, resolution), interpolation=cv2.INTER_CUBIC)
+            
             gen_i, gen_j = args.gen_sample.get(resolution, (5, 1))
             latent_code = torch.randn(gen_j, code_size).cuda()
+            print (f"--------- Neutral: {neutral_files[0].split('/')[-1]} -------------")
             with torch.no_grad():
                 for idx in range(gen_i):
                     label_file, label_code = dataset.labels[idx]
                     label_code = torch.stack([label_code for _ in range(gen_j)]).cuda()
                     image = g_running(
                         latent_code, label_code, step=step, alpha=alpha
-                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
+                    )
+                    score, weight = discriminator(image, label_code, step=step, alpha=alpha)
+                    image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
+                    image = image + neutral_img
+                    print (f"score: {score.item()}; weight: {label_code.data.cpu().numpy()}; weight_pred: {weight.data.cpu().numpy()}")
                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-{label_file.split("/")[-1]}.exr', image, format='EXR-FI')
                     
 #                     label_code = torch.zeros(gen_j, label_size).cuda()
@@ -388,7 +402,7 @@ if __name__ == '__main__':
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # 1 GPU
         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-        args.phase = 600_000
+        args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
