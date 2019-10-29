@@ -291,7 +291,7 @@ class NoiseInjection(nn.Module):
         self.weight = nn.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, image, noise):
-        return image + self.weight * noise
+        return image + self.weight * noise * 0
 
 
 class ConstantInput(nn.Module):
@@ -452,21 +452,28 @@ class Generator(nn.Module):
 
 
 class StyledGenerator(nn.Module):
-    def __init__(self, code_dim=512, n_mlp=8):
+    def __init__(self, code_dim=512, n_mlp=8, label_dim=9):
         super().__init__()
 
         self.generator = Generator(code_dim)
 
-        layers = [PixelNorm()]
+        self.input = PixelNorm()
+        if label_dim > 0:
+            self.label = EqualLinear(label_dim, code_dim)
+            
+        layers = []
         for i in range(n_mlp):
-            layers.append(EqualLinear(code_dim, code_dim))
+            if i == 0:
+                layers.append(EqualLinear(code_dim+code_dim, code_dim))
+            else:
+                layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
-
         self.style = nn.Sequential(*layers)
 
     def forward(
         self,
         input,
+        label=None,
         noise=None,
         step=0,
         alpha=-1,
@@ -479,7 +486,11 @@ class StyledGenerator(nn.Module):
             input = [input]
 
         for i in input:
-            styles.append(self.style(i))
+            if label is not None:
+                latent_code = torch.cat([self.input(i) * 0, self.label(label)], dim=1)
+            else:
+                latent_code = self.input(i)
+            styles.append(self.style(latent_code))
 
         batch = input[0].shape[0]
 
@@ -507,7 +518,7 @@ class StyledGenerator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, fused=True, from_rgb_activate=False):
+    def __init__(self, fused=True, from_rgb_activate=False, in_channel=3, out_channel=1):
         super().__init__()
 
         self.progression = nn.ModuleList(
@@ -526,10 +537,10 @@ class Discriminator(nn.Module):
 
         def make_from_rgb(out_channel):
             if from_rgb_activate:
-                return nn.Sequential(EqualConv2d(3, out_channel, 1), nn.LeakyReLU(0.2))
+                return nn.Sequential(EqualConv2d(in_channel, out_channel, 1), nn.LeakyReLU(0.2))
 
             else:
-                return EqualConv2d(3, out_channel, 1)
+                return EqualConv2d(in_channel, out_channel, 1)
 
         self.from_rgb = nn.ModuleList(
             [
@@ -549,7 +560,7 @@ class Discriminator(nn.Module):
 
         self.n_layer = len(self.progression)
 
-        self.linear = EqualLinear(512, 1)
+        self.linear = EqualLinear(512, out_channel)
 
     def forward(self, input, step=0, alpha=-1):
         for i in range(step, -1, -1):
