@@ -76,7 +76,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
     used_sample = 0
 
     max_step = int(math.log2(args.max_size)) - 2
-    final_progress = False
+    final_progress = True
 
     for i in pbar:
         discriminator.zero_grad()
