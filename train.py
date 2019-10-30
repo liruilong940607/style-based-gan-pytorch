@@ -226,7 +226,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
             loss_exp = (loss_exp2 + loss_exp3) / 2
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + 20.0 * loss_id.mean() +  loss_exp.mean()
+                loss = -predict.mean() + 10.0 * loss_id.mean() +  loss_exp.mean()
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -242,7 +242,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 500 == 0:
+        if (i + 1) % 200 == 0:
             gen_i, gen_j = args.gen_sample.get(resolution, (5, 1))
             latent_code = torch.randn(gen_j, code_size).cuda()
             with torch.no_grad():
@@ -268,7 +268,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_20xlossID_iter-{i}.model',
+                f'checkpoint/train_10xlossID_iter-{i}.model',
             )
 
         state_msg = (
@@ -375,13 +375,13 @@ if __name__ == '__main__':
 #         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
 #         args.phase = 1200_000
 
-        # 2 GPU
-        args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
-        args.phase = 1200_000
-
-#         # 4 GPU
-#         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+#         # 2 GPU
+#         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
 #         args.phase = 1200_000
+
+        # 4 GPU
+        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
