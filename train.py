@@ -226,7 +226,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
             loss_exp = (loss_exp2 + loss_exp3) / 2
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + loss_id.mean() +  loss_exp.mean()
+                loss = -predict.mean() + 20.0 * loss_id.mean() +  loss_exp.mean()
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -268,7 +268,7 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_iter-{i}.model',
+                f'checkpoint/train_20xlossID_iter-{i}.model',
             )
 
         state_msg = (
