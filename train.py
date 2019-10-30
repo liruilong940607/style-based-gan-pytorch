@@ -37,7 +37,7 @@ def accumulate(model1, model2, decay=0.999):
 
 def sample_data(dataset, batch_size, image_size=4):
     dataset.resolution = image_size
-    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=16)
+    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=4)
 
     return loader
 
@@ -48,7 +48,46 @@ def adjust_lr(optimizer, lr):
         group['lr'] = lr * mult
 
         
-def train(args, dataset, generator, discriminator):
+def train_regressor(regressor, data_loader, args, step):
+    requires_grad(regressor, True)
+    optimizer = optim.Adam(regressor.parameters(), lr=0.001, betas=(0.0, 0.99))
+    pbar = tqdm(range(5_000))
+    for i in pbar:
+        tick = time.time()
+        try:
+            real_image, real_label, real_neutral = next(data_loader)
+        except (OSError, StopIteration):
+            data_loader = iter(loader)
+            real_image, real_label, real_neutral = next(data_loader)
+        tock = time.time()
+        
+        real_image = real_image.cuda()
+        real_label = real_label.cuda()
+        real_neutral = real_neutral.cuda()
+        
+        _, real_predictL = regressor(real_image + real_neutral, real_label, step=step, alpha=1.0)
+        loss = MSELoss(real_predictL, real_label) 
+        
+        regressor.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        state_msg = (
+            f'Size: {4 * 2 ** step}; Reg loss: {loss.item():.3f}; Data: {tock-tick: .3f};'
+        )
+        
+        pbar.set_description(state_msg)
+        
+    torch.save(
+        {
+            'regressor': regressor.module.state_dict(),
+        },
+        f'checkpoint/{args.folder}/train_step-{step}-regressor.model',
+    )
+    requires_grad(regressor, False)
+    return regressor
+        
+def train(args, dataset, generator, discriminator, regressor):
     step = int(math.log2(args.init_size)) - 2
     resolution = 4 * 2 ** step
     loader = sample_data(
@@ -76,7 +115,9 @@ def train(args, dataset, generator, discriminator):
     final_progress = False
 
     os.makedirs(f"checkpoint/{args.folder}/", exist_ok=True)
-    os.makedirs(f"sample/{args.folder}/", exist_ok=True)\
+    os.makedirs(f"sample/{args.folder}/", exist_ok=True)
+    
+    regressor = train_regressor(regressor, data_loader, args, step)
         
     for i in pbar:
         discriminator.zero_grad()
@@ -113,12 +154,15 @@ def train(args, dataset, generator, discriminator):
                     'g_optimizer': g_optimizer.state_dict(),
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
+                    'regressor': regressor.module.state_dict(),
                 },
                 f'checkpoint/{args.folder}/train_step-{ckpt_step}.model',
             )
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
+            
+            regressor = train_regressor(regressor, data_loader, args, step)
 
         tick = time.time()
         try:
@@ -126,7 +170,7 @@ def train(args, dataset, generator, discriminator):
                 raise NotImplementedError
                 real_image = next(data_loader)
             else:
-                real_image, real_label = next(data_loader)
+                real_image, real_label, real_neutral = next(data_loader)
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
@@ -134,7 +178,7 @@ def train(args, dataset, generator, discriminator):
                 raise NotImplementedError
                 real_image = next(data_loader)
             else:
-                real_image, real_label = next(data_loader)
+                real_image, real_label, real_neutral = next(data_loader)
         tock = time.time()
                 
         assert real_label is not None
@@ -144,11 +188,13 @@ def train(args, dataset, generator, discriminator):
         b_size = real_image.size(0)
         real_image = real_image.cuda()
         real_label = real_label.cuda()
-
+        real_neutral = real_neutral.cuda()
+        real_neutral.requires_grad = False
+        
         if args.loss == 'wgan-gp':
-            real_predict, real_predictL = discriminator(real_image, real_label, step=step, alpha=alpha)
+            real_predict, real_predictL = discriminator(real_image + real_neutral, real_label, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
-            real_predictL = MSELoss(real_predictL, real_label) 
+            real_predictL = MSELoss(real_predictL, real_label) * 0
             (-real_predict + real_predictL).backward()
 
         elif args.loss == 'r1': # Can't use. Not Implement Conditional
@@ -194,18 +240,18 @@ def train(args, dataset, generator, discriminator):
         fake_label2 = torch.stack([label[1] for label in fake_label2]).cuda()
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
-        fake_predict, fake_predictL = discriminator(fake_image, fake_label1, step=step, alpha=alpha)
+        fake_predict, fake_predictL = discriminator(fake_image + real_neutral, fake_label1, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
-            fake_predictL = MSELoss(fake_predictL, fake_label1) 
+            fake_predictL = MSELoss(fake_predictL, fake_label1) * 0
             # (fake_predict + fake_predictL).backward()
             (fake_predict).backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict, _ = discriminator(x_hat, fake_label1, step=step, alpha=alpha)
+            hat_predict, _ = discriminator(x_hat + real_neutral, fake_label1, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -233,13 +279,15 @@ def train(args, dataset, generator, discriminator):
 
             fake_image = generator(gen_in2, fake_label2, step=step, alpha=alpha)
 
-            predict, predictL = discriminator(fake_image, fake_label2, step=step, alpha=alpha)
-
+            predict, predictL = discriminator(fake_image + real_neutral, fake_label2, step=step, alpha=alpha)
             if args.loss == 'wgan-gp':
                 predict = predict.mean()
-                predictL = MSELoss(predictL, fake_label2) 
+                predictL = MSELoss(predictL, fake_label2) * 0
+                if alpha >= 1.0:
+                    _, predictL = regressor(fake_image + real_neutral, fake_label2, step=step, alpha=1.0)
+                    predictL = MSELoss(predictL, fake_label2)
                 loss = (-predict) + predictL
-
+                
             elif args.loss == 'r1': # Can't use. Not Implement Conditional
                 raise NotImplementedError
                 loss = F.softplus(-predict).mean()
@@ -259,6 +307,7 @@ def train(args, dataset, generator, discriminator):
             neutral_files = sorted(glob.glob(neutral_files))
             neutral_img = imageio.imread(neutral_files[0], format='EXR-FI')
             neutral_img = cv2.resize(neutral_img, (resolution, resolution), interpolation=cv2.INTER_CUBIC)
+            neutral_img_cuda = torch.from_numpy(neutral_img.transpose(2, 0, 1)).float().unsqueeze(0).cuda()
             
             gen_i, gen_j = args.gen_sample.get(resolution, (5, 1))
             latent_code = torch.randn(gen_j, code_size).cuda()
@@ -270,25 +319,14 @@ def train(args, dataset, generator, discriminator):
                     image = g_running(
                         latent_code, label_code, step=step, alpha=alpha
                     )
-                    score, weight = discriminator(image, label_code, step=step, alpha=alpha)
+                    score, _ = discriminator(image + neutral_img_cuda, label_code, step=step, alpha=alpha)
+                    , weight = regressor(image + neutral_img_cuda, label_code, step=step, alpha=alpha)
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
                     image = image + neutral_img
-                    print (f"score: {score.item()}; weight: {label_code.data.cpu().numpy()}; weight_pred: {weight.data.cpu().numpy()}")
+                    np.set_printoptions(precision=2, suppress=True)
+                    print (f"score: {score.item():.2f}; weight: {label_code.data.cpu().numpy()}; weight_pred: {weight.data.cpu().numpy()}")
                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-{label_file.split("/")[-1]}.exr', image, format='EXR-FI')
                     
-#                     label_code = torch.zeros(gen_j, label_size).cuda()
-#                     label_code[:, 4] = 0.2 * (idx + 1)
-#                     image = g_running(
-#                         latent_code, label_code, step=step, alpha=alpha
-#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-#                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-jawOpen-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
-                    
-#                     label_code = torch.zeros(gen_j, label_size).cuda()
-#                     label_code[:, 5] = 0.2 * (idx + 1)
-#                     image = g_running(
-#                         latent_code, label_code, step=step, alpha=alpha
-#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-#                     imageio.imwrite(f'sample/{args.folder}/{str(i + 1).zfill(6)}-mouthClose-{0.2 * (idx + 1):.2f}.exr', image, format='EXR-FI')
 
         if (i + 1) % 1000 == 0:
             torch.save(
@@ -306,7 +344,7 @@ def train(args, dataset, generator, discriminator):
             
         state_msg = (
             f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f} Label-R: {real_predictL.item():.3f}; Label-F: {fake_predictL.item():.3f};'
+            f' Grad: {grad_loss_val:.3f} Label-R: {real_predictL.item():.3f}; Label-F: {predictL.item():.3f};'
             f' Alpha: {alpha:.5f}; Data: {tock-tick: .3f};'
         )
 
@@ -358,6 +396,9 @@ if __name__ == '__main__':
     discriminator = nn.DataParallel(
         Discriminator(label_size, from_rgb_activate=not args.no_from_rgb_activate)
     ).cuda()
+    regressor = nn.DataParallel(
+        Discriminator(label_size, from_rgb_activate=not args.no_from_rgb_activate)
+    ).cuda()
     g_running = StyledGenerator(code_size, label_size).cuda()
     g_running.train(False)
 
@@ -384,6 +425,7 @@ if __name__ == '__main__':
 
         generator.module.load_state_dict(ckpt['generator'])
         discriminator.module.load_state_dict(ckpt['discriminator'])
+        regressor.module.load_state_dict(ckpt['regressor'])
         g_running.load_state_dict(ckpt['g_running'])
         g_optimizer.load_state_dict(ckpt['g_optimizer'])
         d_optimizer.load_state_dict(ckpt['d_optimizer'])
@@ -419,4 +461,4 @@ if __name__ == '__main__':
 
     args.batch_default = 32
 
-    train(args, dataset, generator, discriminator)
+    train(args, dataset, generator, discriminator, regressor)

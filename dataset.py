@@ -7,6 +7,9 @@ from torch.utils.data import Dataset
 import numpy as np
 import torch
 
+import imageio
+import cv2
+
 # "cheekPuff", "eyeBlink_L", "eyeBlink_R", "jawForward", "jawOpen", "mouthClose", "mouthFunnel", "mouthSmile_L", "mouthSmile_R"
 
 class MultiResolutionDataset(Dataset):
@@ -64,9 +67,17 @@ class MultiResolutionDataset(Dataset):
             weight = weight.reshape((9,))
             
             key = f'{self.resolution}-{str(index).zfill(5)}-file'.encode('utf-8')
-            file = txn.get(key).decode('utf-8')
+            wfile = txn.get(key).decode('utf-8')
+            
+            imgfile = wfile.replace("BlendingWeights_9", "PointCloud_Aligned").replace("_BSweights.mat", "_pointcloud.exr").replace("1024", f"{self.resolution}")
+            subs = imgfile.split("_")
+            subs[-2] = "01"
+            file_neutral = "_".join(subs)
+            img_neutral = imageio.imread(file_neutral, format='EXR-FI')
+#             img_neutral = cv2.resize(img_neutral, (self.resolution, self.resolution), interpolation=cv2.INTER_CUBIC)
             
         img = torch.from_numpy(img.transpose(2, 0, 1)).float()
+        img_neutral = torch.from_numpy(img_neutral.transpose(2, 0, 1)).float()
         label = torch.from_numpy(weight).float() 
 
-        return img, label
+        return img, label, img_neutral

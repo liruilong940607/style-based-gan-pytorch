@@ -291,7 +291,7 @@ class NoiseInjection(nn.Module):
         self.weight = nn.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, image, noise):
-        return image + self.weight * noise
+        return image + self.weight * noise * 0
 
 
 class ConstantInput(nn.Module):
@@ -487,7 +487,7 @@ class StyledGenerator(nn.Module):
 
         for i in input:
             if label is not None:
-                latent_code = torch.cat([self.input(i), self.label(label)], dim=1)
+                latent_code = torch.cat([self.input(i) * 0, self.label(label)], dim=1)
             else:
                 latent_code = self.input(i)
             styles.append(self.style(latent_code))
