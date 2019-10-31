@@ -487,7 +487,7 @@ class StyledGenerator(nn.Module):
 
         for i in input:
             if label is not None:
-                latent_code = torch.cat([self.input(i) * 0, self.label(label)], dim=1)
+                latent_code = torch.cat([self.input(i), self.label(label)], dim=1)
             else:
                 latent_code = self.input(i)
             styles.append(self.style(latent_code))
