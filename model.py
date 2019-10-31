@@ -452,19 +452,15 @@ class Generator(nn.Module):
 
 
 class StyledGenerator(nn.Module):
-    def __init__(self, code_dim=512, n_mlp=8, label_dim=9):
+    def __init__(self, code_dim=512, n_mlp=8, label_dim=25):
         super().__init__()
 
         self.generator = Generator(code_dim)
 
-        self.input = PixelNorm()
-        if label_dim > 0:
-            self.label = EqualLinear(label_dim, code_dim)
-            
         layers = []
         for i in range(n_mlp):
-            if i == 0 and label_dim > 0:
-                layers.append(EqualLinear(code_dim+code_dim, code_dim))
+            if i == 0:
+                layers.append(EqualLinear(label_dim, code_dim))
             else:
                 layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
@@ -473,7 +469,6 @@ class StyledGenerator(nn.Module):
     def forward(
         self,
         input,
-        label=None,
         noise=None,
         step=0,
         alpha=-1,
@@ -486,11 +481,7 @@ class StyledGenerator(nn.Module):
             input = [input]
 
         for i in input:
-            if label is not None:
-                latent_code = torch.cat([self.input(i), self.label(label)], dim=1)
-            else:
-                latent_code = self.input(i)
-            styles.append(self.style(latent_code))
+            styles.append(self.style(i))
 
         batch = input[0].shape[0]
 

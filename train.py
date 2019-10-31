@@ -52,13 +52,13 @@ def train_monitorExp(model, resolution, batch_size):
     step = int(math.log2(resolution)) - 2
     
     optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.0, 0.99))
-    MSEloss = nn.MSELoss()
+    Funcloss = nn.L1Loss()
     
     dataset = MultiResolutionDataset(resolution, sameID=False)
     
     data_loader = iter(DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=1))
     
-    pbar = tqdm(range(20_000))
+    pbar = tqdm(range(500))
     for i in pbar:        
         tick = time.time()
         img, label = next(data_loader)
@@ -69,7 +69,7 @@ def train_monitorExp(model, resolution, batch_size):
         predict = model(image, step=step, alpha=1.0)
         
         model.zero_grad()
-        loss = MSEloss(predict, target)
+        loss = Funcloss(predict, target)
         loss.backward()
         optimizer.step()
             
@@ -85,7 +85,7 @@ def train_monitorExp(model, resolution, batch_size):
                     'model': model.module.state_dict(),
                     'optimizer': optimizer.state_dict(),
                 },
-                f'checkpoint/monitorExp-step-{step}-iter-{i}.model',
+                f'checkpoint/monitorExp-25-step-{step}-iter-{i}.model',
             )
 
     torch.save(
@@ -93,7 +93,7 @@ def train_monitorExp(model, resolution, batch_size):
             'model': model.module.state_dict(),
             'optimizer': optimizer.state_dict(),
         },
-        f'checkpoint/monitorExp-step-{step}-iter-{i}.model',
+        f'checkpoint/monitorExp-25-step-{step}-iter-{i}.model',
     )
     requires_grad(model, False)
     return model
@@ -121,7 +121,6 @@ def train(args, dataset, generator, discriminator, monitorExp):
     disc_loss_val = 0
     gen_loss_val = 0
     grad_loss_val = 0
-    id_loss_val = 0
     exp_loss_val = 0
 
     alpha = 0
@@ -130,7 +129,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = True
 
-    monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default)):
+    # monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default))
     
     for i in pbar:
         discriminator.zero_grad()
@@ -174,14 +173,14 @@ def train(args, dataset, generator, discriminator, monitorExp):
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
             
-            monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default)):
+            monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default))
     
         try:
-            real_image, _ = next(data_loader)
+            real_image, real_label = next(data_loader)
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
-            real_image, _ = next(data_loader)
+            real_image, real_label = next(data_loader)
 
         used_sample += real_image.shape[0]
 
@@ -193,17 +192,16 @@ def train(args, dataset, generator, discriminator, monitorExp):
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
             
-        gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
-            2, 0
-        )
-        gen_in1 = gen_in1.squeeze(0)
-        gen_in2 = gen_in2.squeeze(0)
+        #gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
+        #    2, 0
+        #)
+        #gen_in1 = gen_in1.squeeze(0)
+        #gen_in2 = gen_in2.squeeze(0)
 
-        fake_label1 = dataset.sample_label(k=b_size).cuda()
-        fake_label2 = dataset.sample_label(k=b_size).cuda()
-        fake_label3 = dataset.sample_label(k=b_size).cuda()
+        gen_in1 = fake_label1 = dataset.sample_label(k=b_size, randn=False).cuda()
+        gen_in2 = fake_label2 = dataset.sample_label(k=b_size, randn=False).cuda()
         
-        fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
+        fake_image = generator(gen_in1, step=step, alpha=alpha)
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
@@ -233,27 +231,20 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(generator, True)
             requires_grad(discriminator, False)
 
-            fake_image2 = generator(gen_in2, fake_label2, step=step, alpha=alpha)
-            fake_image3 = generator(gen_in2, fake_label3, step=step, alpha=alpha)
-            predict2 = discriminator(fake_image2, step=step, alpha=alpha)
-            predict3 = discriminator(fake_image3, step=step, alpha=alpha)
-            predict = (predict2 + predict3)/2
+            fake_image = generator(gen_in2, step=step, alpha=alpha)
+            predict = discriminator(fake_image, step=step, alpha=alpha)
             
             # monitor Exp
-            predict_exp2 = monitorExp(fake_image2, step=step, alpha=1.0)
-            loss_exp2 = nn.MSELoss()(predict_exp2, fake_label2)
-            predict_exp3 = monitorExp(fake_image3, step=step, alpha=1.0)
-            loss_exp3 = nn.MSELoss()(predict_exp3, fake_label3)
-            loss_exp = (loss_exp2 + loss_exp3) / 2
+            predict_exp = monitorExp(fake_image, step=step, alpha=1.0)
+            loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + 1.0 * loss_id.mean() +  loss_exp.mean()
+                loss = -predict.mean() + loss_exp.mean()
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
 
             gen_loss_val = (-predict.mean()).item()
-            id_loss_val = loss_id.item()
             exp_loss_val = loss_exp.item()
 
             loss.backward()
@@ -263,23 +254,27 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 200 == 0:
-            gen_i, gen_j = args.gen_sample.get(resolution, (5, 1))
-            latent_code = torch.randn(gen_j, code_size).cuda()
+        if (i + 1) % 2 == 0:
+            nsample = 5
+            neutral = dataset.getitem_neutral(rand=True).numpy().transpose(1, 2, 0)
             with torch.no_grad():
-                for idx in range(gen_i):
-                    label_code = torch.stack([dataset.labels[idx]]).cuda()
-                    image = g_running(
-                        latent_code, label_code, step=step, alpha=alpha
-                    )
+                for isample in range(nsample):
+                    label_code = real_label[isample:isample+1]
+                    image = g_running(label_code, step=step, alpha=alpha)
                     score = discriminator.module(image, step=step, alpha=alpha)
                     weight = monitorExp.module(image, step=step, alpha=1.0)
+                
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
+                    image += neutral
                     np.set_printoptions(precision=2, suppress=True)
                     print (f"score: {score.item():.2f}; weight: {label_code.data.cpu().numpy()}; weight_pred: {weight.data.cpu().numpy()}")
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{idx}.exr', image, format='EXR-FI')
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Fake.exr', image, format='EXR-FI')
                     
-                    
+                    real = real_image.data.cpu().numpy()[0].transpose(1, 2, 0)
+                    real += neutral
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.exr', image, format='EXR-FI')
+                
+            
         if (i + 1) % 2000 == 0:
             torch.save(
                 {
@@ -289,11 +284,11 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_1xlossID_iter-{i}.model',
+                f'checkpoint/train_Offset_iter-{i}.model',
             )
 
         state_msg = (
-            f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f}; ID: {id_loss_val:.3f}; Exp: {exp_loss_val:.3f};'
+            f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f}; Exp: {exp_loss_val:.3f};'
             f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}'
         )
 
@@ -342,10 +337,10 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
+    generator = nn.DataParallel(StyledGenerator(code_size, label_dim=label_size)).cuda()
     discriminator = nn.DataParallel(Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
     monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
-    g_running = StyledGenerator(code_size).cuda()
+    g_running = StyledGenerator(code_size, label_dim=label_size).cuda()
     g_running.train(False)
 
     class_loss = nn.CrossEntropyLoss()

@@ -15,7 +15,7 @@ import IPython
 import os
 import random
 import torch
-
+import tqdm
 
 def To_tensor(img):
     return torch.from_numpy(img.transpose(2, 0, 1)).float()
@@ -150,6 +150,7 @@ class FWHDataset():
     
         # specific attributes
         self.labels = self.load_labels()
+        # self.labels = []
         self.labels_mean = load_mat("/mount/ForRuilong/FaceWareHouseExp/weightsFacewareMeanStd.mat", "Expression_mean")[0]
         self.labels_std = load_mat("/mount/ForRuilong/FaceWareHouseExp/weightsFacewareMeanStd.mat", "Expression_std")[0]
     
@@ -167,17 +168,18 @@ class FWHDataset():
     
     def load_labels(self):
         labels = []
-        for id, names in self.identities.items():
+        print ("loading labels ...")
+        for id, names in tqdm.tqdm(self.identities.items()):
             for name in names:
-                label = torch.from_numpy(load_mat(self.get_label_file(name), "BSweights")[:, 0]).float() 
+                label = torch.from_numpy(load_mat(self.get_label_file(name), "BSweights")).float() 
                 labels.append(label)
         return labels
         
     def sample_label(self, k=1, randn=False):
         # return [k * label_size]
         if randn:
-            mean = torch.from_numpy(self.labels_mean).repeat(k, 1)
-            std = torch.from_numpy(self.labels_std).repeat(k, 1)
+            mean = torch.from_numpy(self.labels_mean).unsqueeze(0).repeat(k, 1)
+            std = torch.from_numpy(self.labels_std).unsqueeze(0).repeat(k, 1)
             return torch.normal(mean=mean, std=std)
             
         else:
@@ -192,6 +194,8 @@ class FWHDataset():
         identities = {}
         for name in names:
             identity = name.split("_01_blendshape_")[0]
+            if not os.path.exists(self.get_neutral_file(name, 1024)):
+                continue
             if identity not in identities:
                 identities[identity] = []
             identities[identity].append(name)
@@ -248,18 +252,23 @@ class MultiResolutionDataset(FWHDataset):
             imgs = [img-img_neutral for img, img_neutral in zip(imgs, imgs_neutral)]
             
         labels_path = [self.get_label_file(name) for name in names]
-        labels = [torch.from_numpy(load_mat(label_path, "BSweights")[:, 0]).float() for label_path in labels_path]
+        labels = [torch.from_numpy(load_mat(label_path, "BSweights")).float() for label_path in labels_path]
             
         return imgs[0], labels[0]
         # return imgs[0], labels[0], imgs[1], labels[1] 
 
 if __name__ == "__main__":
-    FWHDataset.process()
+    #FWHDataset.process()
     
-#    dataset = MultiResolutionDataset(resolution=64, exclude_neutral=True)
-#    img_neutral = dataset.getitem_neutral(rand=True)
-#    for i in range(10):
-#        img, label = dataset[0]
+    
+    dataset = MultiResolutionDataset(resolution=64, exclude_neutral=True)
+
+    labels = dataset.sample_label(k=10, randn=True)
+    print (labels)
+    
+    img_neutral = dataset.getitem_neutral(rand=True)
+    for i in range(10):
+        img, label = dataset[0]
         
-#        save_img(f"test_rand_add_neutral/{i}.exr", To_numpy(img + img_neutral))
+        save_img(f"test_rand_add_neutral/{i}.exr", To_numpy(img + img_neutral))
 #        # save_mat(f"tmp/test.mat", To_numpy(img + img_neutral), "data")
