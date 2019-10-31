@@ -349,7 +349,7 @@ if __name__ == '__main__':
         help='use activate in from_rgb (original implementation)',
     )
     parser.add_argument(
-        '--mixing', action='store_true', default=True, help='use mixing regularization', 
+        '--mixing', action='store_true', default=False, help='use mixing regularization', 
     )
     parser.add_argument(
         '--loss',
