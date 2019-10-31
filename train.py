@@ -192,40 +192,16 @@ def train(args, dataset, generator, discriminator, monitorExp):
             real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
+            
+        gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
+            2, 0
+        )
+        gen_in1 = gen_in1.squeeze(0)
+        gen_in2 = gen_in2.squeeze(0)
 
-        elif args.loss == 'r1':
-            real_image.requires_grad = True
-            real_scores = discriminator(real_image, step=step, alpha=alpha)
-            real_predict = F.softplus(-real_scores).mean()
-            real_predict.backward(retain_graph=True)
-
-            grad_real = grad(
-                outputs=real_scores.sum(), inputs=real_image, create_graph=True
-            )[0]
-            grad_penalty = (
-                grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2
-            ).mean()
-            grad_penalty = 10 / 2 * grad_penalty
-            grad_penalty.backward()
-            grad_loss_val = grad_penalty.item()
-
-        if args.mixing and random.random() < 0.9:
-            gen_in11, gen_in12, gen_in21, gen_in22 = torch.randn(
-                4, b_size, code_size, device='cuda'
-            ).chunk(4, 0)
-            gen_in1 = [gen_in11.squeeze(0), gen_in12.squeeze(0)]
-            gen_in2 = [gen_in21.squeeze(0), gen_in22.squeeze(0)]
-
-        else:
-            gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
-                2, 0
-            )
-            gen_in1 = gen_in1.squeeze(0)
-            gen_in2 = gen_in2.squeeze(0)
-
-        fake_label1 = torch.stack(random.choices(dataset.labels, k=b_size)).cuda()
-        fake_label2 = torch.stack(random.choices(dataset.labels, k=b_size)).cuda()
-        fake_label3 = torch.stack(random.choices(dataset.labels, k=b_size)).cuda()
+        fake_label1 = dataset.sample_label(k=b_size).cuda()
+        fake_label2 = dataset.sample_label(k=b_size).cuda()
+        fake_label3 = dataset.sample_label(k=b_size).cuda()
         
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
@@ -249,11 +225,6 @@ def train(args, dataset, generator, discriminator, monitorExp):
             grad_loss_val = grad_penalty.item()
             disc_loss_val = (real_predict - fake_predict).item()
 
-        elif args.loss == 'r1':
-            fake_predict = F.softplus(fake_predict).mean()
-            fake_predict.backward()
-            disc_loss_val = (real_predict + fake_predict).item()
-
         d_optimizer.step()
 
         if (i + 1) % n_critic == 0:
@@ -276,7 +247,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             loss_exp = (loss_exp2 + loss_exp3) / 2
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + 20.0 * loss_id.mean() +  loss_exp.mean()
+                loss = -predict.mean() + 1.0 * loss_id.mean() +  loss_exp.mean()
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -318,7 +289,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_20xlossID_iter-{i}.model',
+                f'checkpoint/train_1xlossID_iter-{i}.model',
             )
 
         state_msg = (
@@ -331,7 +302,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
 if __name__ == '__main__':
     code_size = 512
-    label_size = 9
+    label_size = 25
     batch_size = 16
     n_critic = 1
 
@@ -351,7 +322,7 @@ if __name__ == '__main__':
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default="./checkpoint/monitorExp-step-4-iter-19999.model", type=str,
+        '--ckptExp', default=None, type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
@@ -359,7 +330,7 @@ if __name__ == '__main__':
         help='use activate in from_rgb (original implementation)',
     )
     parser.add_argument(
-        '--mixing', action='store_true', default=True, help='use mixing regularization', 
+        '--mixing', action='store_true', default=False, help='use mixing regularization', 
     )
     parser.add_argument(
         '--loss',
@@ -374,8 +345,6 @@ if __name__ == '__main__':
     generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
     discriminator = nn.DataParallel(Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
     monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
-    ckpt = torch.load(args.ckptExp)
-    monitorExp.module.load_state_dict(ckpt['model'])
     g_running = StyledGenerator(code_size).cuda()
     g_running.train(False)
 
@@ -415,17 +384,17 @@ if __name__ == '__main__':
 
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-#         # 1 GPU
-#         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-#         args.phase = 1200_000
+        # 1 GPU
+        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+        args.phase = 1200_000
 
 #         # 2 GPU
 #         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
 #         args.phase = 1200_000
 
-        # 4 GPU
-        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
-        args.phase = 1200_000
+#        # 4 GPU
+#        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+#        args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
