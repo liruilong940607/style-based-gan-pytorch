@@ -260,7 +260,7 @@ if __name__ == "__main__":
         test_monitorID("./checkpoint/monitorID-step-4-iter-15000.model", 64, 32)
         
     if args.trainExp:
-        label_size = 9
+        label_size = 25
         monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
         monitorExp = train_monitorExp(monitorExp, resolution=64, batch_size=32)
         

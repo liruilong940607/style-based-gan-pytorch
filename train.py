@@ -46,9 +46,61 @@ def adjust_lr(optimizer, lr):
         mult = group.get('mult', 1)
         group['lr'] = lr * mult
 
+        
+def train_monitorExp(model, resolution, batch_size):
+    requires_grad(model, True)
+    step = int(math.log2(resolution)) - 2
+    
+    optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.0, 0.99))
+    MSEloss = nn.MSELoss()
+    
+    dataset = MultiResolutionDataset(resolution, sameID=False)
+    
+    data_loader = iter(DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=1))
+    
+    pbar = tqdm(range(20_000))
+    for i in pbar:        
+        tick = time.time()
+        img, label = next(data_loader)
+        tock = time.time()
 
-def train(args, dataset, generator, discriminator, monitorID, monitorExp):
-    requires_grad(monitorID, False)
+        image = img.cuda()
+        target = label.cuda()
+        predict = model(image, step=step, alpha=1.0)
+        
+        model.zero_grad()
+        loss = MSEloss(predict, target)
+        loss.backward()
+        optimizer.step()
+            
+        state_msg = (
+            f'[MonitorExp] Size: {4 * 2 ** step}; Loss: {loss.item():.3f}; Data: {tock-tick:.3f};'
+        )
+
+        pbar.set_description(state_msg)
+        
+        if i%5000 == 0:
+            torch.save(
+                {
+                    'model': model.module.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                },
+                f'checkpoint/monitorExp-step-{step}-iter-{i}.model',
+            )
+
+    torch.save(
+        {
+            'model': model.module.state_dict(),
+            'optimizer': optimizer.state_dict(),
+        },
+        f'checkpoint/monitorExp-step-{step}-iter-{i}.model',
+    )
+    requires_grad(model, False)
+    return model
+
+
+        
+def train(args, dataset, generator, discriminator, monitorExp):
     requires_grad(monitorExp, False)
     
     step = int(math.log2(args.init_size)) - 2
@@ -78,6 +130,8 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = True
 
+    monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default)):
+    
     for i in pbar:
         discriminator.zero_grad()
 
@@ -119,13 +173,15 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
-
+            
+            monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default)):
+    
         try:
-            real_image, _, _, _ = next(data_loader)
+            real_image, _ = next(data_loader)
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
-            real_image, _, _, _ = next(data_loader)
+            real_image, _ = next(data_loader)
 
         used_sample += real_image.shape[0]
 
@@ -212,12 +268,6 @@ def train(args, dataset, generator, discriminator, monitorID, monitorExp):
             predict3 = discriminator(fake_image3, step=step, alpha=alpha)
             predict = (predict2 + predict3)/2
             
-            # monitor ID
-            image_id = torch.cat([fake_image2, fake_image3], dim=1)
-            predict_id = monitorID(image_id, step=step, alpha=1.0)
-            target_id = torch.ones(image_id.size(0), dtype=torch.long).cuda()
-            loss_id = nn.CrossEntropyLoss()(predict_id, target_id)
-            
             # monitor Exp
             predict_exp2 = monitorExp(fake_image2, step=step, alpha=1.0)
             loss_exp2 = nn.MSELoss()(predict_exp2, fake_label2)
@@ -301,9 +351,6 @@ if __name__ == '__main__':
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptID', default="./checkpoint/monitorID-step-4-iter-19999.model", type=str,
-    )
-    parser.add_argument(
         '--ckptExp', default="./checkpoint/monitorExp-step-4-iter-19999.model", type=str,
     )
     parser.add_argument(
@@ -326,9 +373,6 @@ if __name__ == '__main__':
 
     generator = nn.DataParallel(StyledGenerator(code_size)).cuda()
     discriminator = nn.DataParallel(Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
-    monitorID = nn.DataParallel(Discriminator(from_rgb_activate=True, in_channel=6, out_channel=2)).cuda()
-    ckpt = torch.load(args.ckptID)
-    monitorID.module.load_state_dict(ckpt['model'])
     monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
     ckpt = torch.load(args.ckptExp)
     monitorExp.module.load_state_dict(ckpt['model'])
@@ -367,7 +411,7 @@ if __name__ == '__main__':
         ]
     )
 
-    dataset = MultiResolutionDataset(resolution=args.init_size, sameID=False)
+    dataset = MultiResolutionDataset(resolution=args.init_size, exclude_neutral=True)
 
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
@@ -398,4 +442,4 @@ if __name__ == '__main__':
 
     args.batch_default = 32
 
-    train(args, dataset, generator, discriminator, monitorID, monitorExp)
+    train(args, dataset, generator, discriminator, monitorExp)

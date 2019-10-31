@@ -463,7 +463,7 @@ class StyledGenerator(nn.Module):
             
         layers = []
         for i in range(n_mlp):
-            if i == 0:
+            if i == 0 and label_dim > 0:
                 layers.append(EqualLinear(code_dim+code_dim, code_dim))
             else:
                 layers.append(EqualLinear(code_dim, code_dim))
@@ -487,7 +487,7 @@ class StyledGenerator(nn.Module):
 
         for i in input:
             if label is not None:
-                latent_code = torch.cat([self.input(i) * 0, self.label(label)], dim=1)
+                latent_code = torch.cat([self.input(i), self.label(label)], dim=1)
             else:
                 latent_code = self.input(i)
             styles.append(self.style(latent_code))
