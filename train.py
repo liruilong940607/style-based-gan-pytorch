@@ -222,7 +222,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + loss_exp.mean() * 10.0
+                loss = -predict.mean() + loss_exp.mean() 
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -244,7 +244,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     label_code = real_label[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
                     score = discriminator.module(image + neutral, step=step, alpha=alpha)
-                    weight = monitorExp.module(image, step=step, alpha=1.0)
+                    weight = monitorExp.module(image + neutral, step=step, alpha=1.0)
                 
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
                     image += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
