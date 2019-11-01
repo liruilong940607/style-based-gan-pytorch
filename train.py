@@ -20,6 +20,41 @@ import random
 import time
 import imageio
 import numpy as np
+import glob
+import imageio
+import scipy.io
+import cv2
+import IPython
+import os
+import random
+import torch
+
+def To_tensor(img):
+    return torch.from_numpy(img.transpose(2, 0, 1)).float()
+
+def To_numpy(tensor):
+    return tensor.detach().cpu().numpy().transpose(1, 2, 0)
+
+
+def load_img(filename):
+    return imageio.imread(filename, format='EXR-FI')
+
+def save_img(filename_out, img, skip_if_exist=False):    
+    if skip_if_exist and os.path.exists(filename_out):
+        return
+    os.makedirs(os.path.dirname(filename_out), exist_ok=True)
+    imageio.imwrite(filename_out, img, format='EXR-FI')
+
+    
+def load_mat(filename, key):
+    return scipy.io.loadmat(filename)[key]
+
+def save_mat(filename_out, data, key, skip_if_exist=False):
+    if skip_if_exist and os.path.exists(filename_out):
+        return
+    os.makedirs(os.path.dirname(filename_out), exist_ok=True)
+    scipy.io.savemat(filename_out, {key: data})
+
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -45,59 +80,6 @@ def adjust_lr(optimizer, lr):
     for group in optimizer.param_groups:
         mult = group.get('mult', 1)
         group['lr'] = lr * mult
-
-        
-def train_monitorExp(model, resolution, batch_size):
-    requires_grad(model, True)
-    step = int(math.log2(resolution)) - 2
-    
-    optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.0, 0.99))
-    Funcloss = nn.L1Loss()
-    
-    dataset = MultiResolutionDataset(resolution, sameID=False)
-    
-    data_loader = iter(DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=1))
-    
-    pbar = tqdm(range(500))
-    for i in pbar:        
-        tick = time.time()
-        img, label = next(data_loader)
-        tock = time.time()
-
-        image = img.cuda()
-        target = label.cuda()
-        predict = model(image, step=step, alpha=1.0)
-        
-        model.zero_grad()
-        loss = Funcloss(predict, target)
-        loss.backward()
-        optimizer.step()
-            
-        state_msg = (
-            f'[MonitorExp] Size: {4 * 2 ** step}; Loss: {loss.item():.3f}; Data: {tock-tick:.3f};'
-        )
-
-        pbar.set_description(state_msg)
-        
-        if i%5000 == 0:
-            torch.save(
-                {
-                    'model': model.module.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                },
-                f'checkpoint/monitorExp-25-step-{step}-iter-{i}.model',
-            )
-
-    torch.save(
-        {
-            'model': model.module.state_dict(),
-            'optimizer': optimizer.state_dict(),
-        },
-        f'checkpoint/monitorExp-25-step-{step}-iter-{i}.model',
-    )
-    requires_grad(model, False)
-    return model
-
 
         
 def train(args, dataset, generator, discriminator, monitorExp):
@@ -128,8 +110,6 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = True
-
-    # monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default))
     
     for i in pbar:
         discriminator.zero_grad()
@@ -172,9 +152,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
-            
-            monitorExp = train_monitorExp(monitorExp, resolution, args.batch.get(resolution, args.batch_default))
-    
+                
         try:
             real_image, real_label = next(data_loader)
 
@@ -186,23 +164,28 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
+        neutral = dataset.getitem_neutral(rand=True)
+        neutral = neutral.unsqueeze(0).cuda()
 
         if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image, step=step, alpha=alpha)
+            real_predict = discriminator(real_image + neutral, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
-            
-        #gen_in1, gen_in2 = torch.randn(2, b_size, code_size, device='cuda').chunk(
-        #    2, 0
-        #)
-        #gen_in1 = gen_in1.squeeze(0)
-        #gen_in2 = gen_in2.squeeze(0)
 
-        gen_in1 = fake_label1 = dataset.sample_label(k=b_size, randn=False).cuda()
-        gen_in2 = fake_label2 = dataset.sample_label(k=b_size, randn=False).cuda()
+        fake_label1 = dataset.sample_label(k=b_size).cuda()
+        fake_label2 = dataset.sample_label(k=b_size).cuda()
+        
+#         rand_scale1 = torch.rand_like(fake_label1, device=fake_label1.device) * 0.2 + 0.9 
+#         rand_scale2 = torch.rand_like(fake_label2, device=fake_label2.device) * 0.2 + 0.9 
+        
+#         fake_label1 *= rand_scale1
+#         fake_label2 *= rand_scale2
+        
+        gen_in1 = fake_label1
+        gen_in2 = fake_label2
         
         fake_image = generator(gen_in1, step=step, alpha=alpha)
-        fake_predict = discriminator(fake_image, step=step, alpha=alpha)
+        fake_predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
@@ -211,7 +194,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, step=step, alpha=alpha)
+            hat_predict = discriminator(x_hat + neutral, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -232,14 +215,14 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(discriminator, False)
 
             fake_image = generator(gen_in2, step=step, alpha=alpha)
-            predict = discriminator(fake_image, step=step, alpha=alpha)
+            predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
             
             # monitor Exp
-            predict_exp = monitorExp(fake_image, step=step, alpha=1.0)
+            predict_exp = monitorExp(fake_image + neutral, step=step, alpha=1.0)
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + loss_exp.mean()
+                loss = -predict.mean() + loss_exp.mean() * 10.0
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -254,28 +237,28 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 2 == 0:
+        if (i + 1) % 200 == 0:
             nsample = 5
-            neutral = dataset.getitem_neutral(rand=True).numpy().transpose(1, 2, 0)
             with torch.no_grad():
                 for isample in range(nsample):
-                    label_code = real_label[isample:isample+1]
+                    label_code = real_label[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
-                    score = discriminator.module(image, step=step, alpha=alpha)
+                    score = discriminator.module(image + neutral, step=step, alpha=alpha)
                     weight = monitorExp.module(image, step=step, alpha=1.0)
                 
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
-                    image += neutral
+                    image += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
                     np.set_printoptions(precision=2, suppress=True)
                     print (f"score: {score.item():.2f}; weight: {label_code.data.cpu().numpy()}; weight_pred: {weight.data.cpu().numpy()}")
                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Fake.exr', image, format='EXR-FI')
+                    save_mat(f'sample/{str(i + 1).zfill(6)}-{isample}--Fake.mat', image, "data")
                     
                     real = real_image.data.cpu().numpy()[0].transpose(1, 2, 0)
-                    real += neutral
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.exr', image, format='EXR-FI')
-                
+                    real += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.exr', real, format='EXR-FI')
+                    save_mat(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.mat', real, "data")
             
-        if (i + 1) % 2000 == 0:
+        if (i + 1) % 500 == 0:
             torch.save(
                 {
                     'generator': generator.module.state_dict(),
@@ -284,7 +267,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_Offset_iter-{i}.model',
+                f'checkpoint/train_Offset_10xExp_iter-{i}.model',
             )
 
         state_msg = (
@@ -297,7 +280,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
 if __name__ == '__main__':
     code_size = 512
-    label_size = 25
+    label_size = 9
     batch_size = 16
     n_critic = 1
 
@@ -317,7 +300,7 @@ if __name__ == '__main__':
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default=None, type=str,
+        '--ckptExp', default='./checkpoint/save-monitorExp-9-MSE0.4-res64.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
@@ -340,6 +323,8 @@ if __name__ == '__main__':
     generator = nn.DataParallel(StyledGenerator(code_size, label_dim=label_size)).cuda()
     discriminator = nn.DataParallel(Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
     monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
+    ckpt = torch.load(args.ckptExp)
+    monitorExp.module.load_state_dict(ckpt['model'])
     g_running = StyledGenerator(code_size, label_dim=label_size).cuda()
     g_running.train(False)
 
@@ -379,9 +364,9 @@ if __name__ == '__main__':
 
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-        # 1 GPU
-        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
-        args.phase = 1200_000
+#         # 1 GPU
+#         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+#         args.phase = 1200_000
 
 #         # 2 GPU
 #         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
@@ -396,8 +381,8 @@ if __name__ == '__main__':
 #         args.phase = 1200_000
         
         # 8 GPU
-#         args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
-#         args.phase = 1200_000
+        args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
+        args.phase = 1200_000
     else:
         args.lr = {}
         args.batch = {}
