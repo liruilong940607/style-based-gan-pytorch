@@ -241,7 +241,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             nsample = 5
             with torch.no_grad():
                 for isample in range(nsample):
-                    label_code = real_label[isample:isample+1].cuda()
+                    label_code = fake_label1[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
                     score = discriminator.module(image, step=step, alpha=alpha)
                     weight = monitorExp.module(image, step=step, alpha=1.0)

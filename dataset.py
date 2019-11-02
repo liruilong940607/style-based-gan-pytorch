@@ -367,6 +367,8 @@ class MultiResolutionDataset():
         
         self.labels = sorted(glob.glob(paths.file_exp_weights))
         self.images = sorted(glob.glob(paths.file_exp_pointcloud_ms.format(resolution)))
+        self.labels, self.images = self._check(self.labels, self.images)
+        
         self.neutral_images = []
         for f in self.images:
             neutral_f = f.replace(paths.folder_exp_pointcloud_ms.format(resolution),
@@ -380,14 +382,26 @@ class MultiResolutionDataset():
         self.labels_std = paths.load_exp_std()
             
         self.length = len(self.labels)
+        print (len(self.labels), len(self.images), len(self.neutral_images))
         
     def __len__(self):
         return 10_000_000
     
+    def _check(self, labels, images):
+        labels_valid, images_valid = [], []
+        for label in labels:
+            image = os.path.join(paths.folder_exp_pointcloud_ms.format(self.resolution),
+                                 label.split('/')[-1].replace('.mat', '_pointcloud.exr'))
+            if image in images:
+                labels_valid.append(label)
+                images_valid.append(image)
+        return labels_valid, images_valid
+        
+    
     def sample_label(self, k=1, randn=True):
         # return [k * label_size]
         mean = torch.from_numpy(self.labels_mean).unsqueeze(0).repeat(k, 1)
-        std = torch.from_numpy(self.labels_std).unsqueeze(0).repeat(k, 1)
+        std = torch.from_numpy(self.labels_std).unsqueeze(0).repeat(k, 1) * 5
         return torch.normal(mean=mean, std=std).float()
             
     def getitem_neutral(self, index=None, rand=False):
