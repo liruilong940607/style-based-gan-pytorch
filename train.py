@@ -168,7 +168,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
         neutral = neutral.unsqueeze(0).cuda()
 
         if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image, step=step, alpha=alpha)
+            real_predict = discriminator(real_image + neutral, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
 
@@ -185,7 +185,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
         gen_in2 = fake_label2
         
         fake_image = generator(gen_in1, step=step, alpha=alpha)
-        fake_predict = discriminator(fake_image, step=step, alpha=alpha)
+        fake_predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
@@ -194,7 +194,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat, step=step, alpha=alpha)
+            hat_predict = discriminator(x_hat + neutral, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -215,14 +215,14 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(discriminator, False)
 
             fake_image = generator(gen_in2, step=step, alpha=alpha)
-            predict = discriminator(fake_image , step=step, alpha=alpha)
+            predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
             
             # monitor Exp
             predict_exp = monitorExp(fake_image, step=step, alpha=1.0)
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + loss_exp.mean() 
+                loss = -predict.mean() + loss_exp.mean() *1000
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
@@ -232,7 +232,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
             loss.backward()
             g_optimizer.step()
-            accumulate(g_running, generator.module)
+            accumulate(g_running, generator.module, 0)
 
             requires_grad(generator, False)
             requires_grad(discriminator, True)
@@ -241,9 +241,9 @@ def train(args, dataset, generator, discriminator, monitorExp):
             nsample = 5
             with torch.no_grad():
                 for isample in range(nsample):
-                    label_code = fake_label1[isample:isample+1].cuda()
+                    label_code = real_label[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
-                    score = discriminator.module(image, step=step, alpha=alpha)
+                    score = discriminator.module(image + neutral, step=step, alpha=alpha)
                     weight = monitorExp.module(image, step=step, alpha=1.0)
                 
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
@@ -253,7 +253,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Fake.exr', image, format='EXR-FI')
                     save_mat(f'sample/{str(i + 1).zfill(6)}-{isample}--Fake.mat', image, "data")
                     
-                    real = real_image.data.cpu().numpy()[0].transpose(1, 2, 0)
+                    real = real_image.data.cpu().numpy()[isample].transpose(1, 2, 0)
                     real += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.exr', real, format='EXR-FI')
                     save_mat(f'sample/{str(i + 1).zfill(6)}-{isample}--Real.mat', real, "data")
@@ -267,7 +267,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_Offset_10xExp_iter-{i}.model',
+                f'checkpoint/train_Offset_1000xExp_iter-{i}.model',
             )
 
         state_msg = (
@@ -372,17 +372,17 @@ if __name__ == '__main__':
 #         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
 #         args.phase = 1200_000
 
-#        # 4 GPU
-#        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
-#        args.phase = 1200_000
+        # 4 GPU
+        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
 #         args.phase = 1200_000
         
-        # 8 GPU
-        args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
-        args.phase = 1200_000
+#         # 8 GPU
+#         args.batch = {4: 4096, 8: 2048, 16: 1024, 32: 512, 64: 128, 128: 64, 256: 32, 512: 16, 1024: 8}
+#         args.phase = 1200_000
     else:
         args.lr = {}
         args.batch = {}

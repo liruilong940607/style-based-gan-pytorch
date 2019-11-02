@@ -10,9 +10,13 @@ from os.path import join as osp
 
 
 # roots to store data
-root_raw = "/home/ICT2000/rli/mnt/vgldb1/LightStageFaceDB/Datasets/FaceEncoding/"
-root_process = "/home/ICT2000/rli/mnt/glab2/ForRuilong/FaceEncoding_process2/"
-root_yajie = "/home/ICT2000/rli/mnt/glab2/Users/yajie/"
+# root_raw = "/home/ICT2000/rli/mnt/vgldb1/LightStageFaceDB/Datasets/FaceEncoding/"
+# root_process = "/home/ICT2000/rli/mnt/glab2/ForRuilong/FaceEncoding_process2/"
+# root_yajie = "/home/ICT2000/rli/mnt/glab2/Users/yajie/"
+
+root_raw = ""
+root_process = "/mount/ForRuilong/FaceEncoding_process2/"
+root_yajie = "/mount/Users/yajie/"
 
 # folders 4k
 folder_pointcloud_4k = osp(root_raw, "PointCloud_Aligned")
