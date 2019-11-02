@@ -232,7 +232,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
             loss.backward()
             g_optimizer.step()
-            accumulate(g_running, generator.module)
+            accumulate(g_running, generator.module, 0)
 
             requires_grad(generator, False)
             requires_grad(discriminator, True)
