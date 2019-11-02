@@ -168,12 +168,12 @@ def train(args, dataset, generator, discriminator, monitorExp):
         neutral = neutral.unsqueeze(0).cuda()
 
         if args.loss == 'wgan-gp':
-            real_predict = discriminator(real_image + neutral, step=step, alpha=alpha)
+            real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
 
-        fake_label1 = dataset.sample_label(k=b_size).cuda()
-        fake_label2 = dataset.sample_label(k=b_size).cuda()
+        fake_label1 = dataset.sample_label(k=b_size, randn=True).cuda()
+        fake_label2 = dataset.sample_label(k=b_size, randn=True).cuda()
         
 #         rand_scale1 = torch.rand_like(fake_label1, device=fake_label1.device) * 0.2 + 0.9 
 #         rand_scale2 = torch.rand_like(fake_label2, device=fake_label2.device) * 0.2 + 0.9 
@@ -185,7 +185,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
         gen_in2 = fake_label2
         
         fake_image = generator(gen_in1, step=step, alpha=alpha)
-        fake_predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
+        fake_predict = discriminator(fake_image, step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
@@ -194,7 +194,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
-            hat_predict = discriminator(x_hat + neutral, step=step, alpha=alpha)
+            hat_predict = discriminator(x_hat, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
             )[0]
@@ -215,10 +215,10 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(discriminator, False)
 
             fake_image = generator(gen_in2, step=step, alpha=alpha)
-            predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
+            predict = discriminator(fake_image , step=step, alpha=alpha)
             
             # monitor Exp
-            predict_exp = monitorExp(fake_image + neutral, step=step, alpha=1.0)
+            predict_exp = monitorExp(fake_image, step=step, alpha=1.0)
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
@@ -243,8 +243,8 @@ def train(args, dataset, generator, discriminator, monitorExp):
                 for isample in range(nsample):
                     label_code = real_label[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
-                    score = discriminator.module(image + neutral, step=step, alpha=alpha)
-                    weight = monitorExp.module(image + neutral, step=step, alpha=1.0)
+                    score = discriminator.module(image, step=step, alpha=alpha)
+                    weight = monitorExp.module(image, step=step, alpha=1.0)
                 
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
                     image += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
@@ -280,7 +280,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
 
 if __name__ == '__main__':
     code_size = 512
-    label_size = 9
+    label_size = 25
     batch_size = 16
     n_critic = 1
 
@@ -300,7 +300,7 @@ if __name__ == '__main__':
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default='./checkpoint/save-monitorExp-9-MSE0.4-res64.model', type=str,
+        '--ckptExp', default='./monitorExp-25-Rand-step-4-iter-19999.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',

@@ -18,6 +18,7 @@ from model import StyledGenerator, Discriminator
 
 import random
 import time
+import paths
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -167,9 +168,11 @@ def train_monitorExp(model, resolution, batch_size):
     MSEloss = nn.MSELoss()
     CEloss = nn.CrossEntropyLoss()
     
-    dataset = MultiResolutionDataset(resolution, sameID=False, exclude_neutral=False)
+    dataset = MultiResolutionDataset(resolution, sameID=False, exclude_neutral=True)
     
     data_loader = iter(DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=12))
+    
+    std = paths.file_exp_meanstd
     
     pbar = tqdm(range(20_000))
     for i in pbar:        
@@ -207,7 +210,7 @@ def train_monitorExp(model, resolution, batch_size):
                     'model': model.module.state_dict(),
                     'optimizer': optimizer.state_dict(),
                 },
-                f'checkpoint/monitorExp-9-step-{step}-iter-{i}.model',
+                f'checkpoint/monitorExp-25-Rand-step-{step}-iter-{i}.model',
             )
 
     torch.save(
@@ -215,7 +218,7 @@ def train_monitorExp(model, resolution, batch_size):
             'model': model.module.state_dict(),
             'optimizer': optimizer.state_dict(),
         },
-        f'checkpoint/monitorExp-9-step-{step}-iter-{i}.model',
+        f'checkpoint/monitorExp-25-Rand-step-{step}-iter-{i}.model',
     )
     requires_grad(model, False)
     return model
@@ -280,7 +283,7 @@ if __name__ == "__main__":
         test_monitorID("./checkpoint/monitorID-step-4-iter-15000.model", 64, 32)
         
     if args.trainExp:
-        label_size = 9
+        label_size = 25
         monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
         batch_size = args.batch.get(args.resolution, 32) * 8
         monitorID = train_monitorExp(monitorExp, args.resolution, batch_size)

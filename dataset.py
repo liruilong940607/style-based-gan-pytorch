@@ -17,6 +17,8 @@ import random
 import torch
 import tqdm
 
+import paths
+
 # on server 01-05, use this.
 #root_dir = "/mount/ForRuilong/"
 # on my local ARYA machine, use this.
@@ -212,9 +214,92 @@ class FWHDataset():
                 
         return identities, names
     
+def _load_and_save2(file, root_geo, root_expw):
+    img = load_img(os.path.join(root_geo, file))
+    wfile_in = file.replace("_pointcloud.exr", ".mat")
+    wfile_out = file.replace("_pointcloud.exr", "_BSweights.mat")
+    weight = load_mat(os.path.join(root_expw, wfile_in), "BSweights")        
+    for resolution in [8, 16, 32, 64, 128, 256, 512, 1024]:
+        os.makedirs(root_dir + f"/FaceWareHouseRandExp/{resolution}", exist_ok=True)
+        img = cv2.resize(img, (resolution, resolution), interpolation=cv2.INTER_CUBIC)
+        save_img(root_dir + f"/FaceWareHouseRandExp/{resolution}/PointCloud_Aligned/{file}", img, skip_if_exist=True)
+        save_mat(root_dir + f"/FaceWareHouseRandExp/{resolution}/BlendingWeightsFWH/{wfile_out}", weight, "BSweights", skip_if_exist=True)
+    
+    
 
-class MultiResolutionDataset(BaseDataset):
+class FWHRandDataset():
+    def __init__(self, exclude_neutral=True):
+        self.root_geo = paths.folder_exp_pointcloud_ms
+        self.root_expw = paths.folder_exp_weights
+        self.root_geo_neutral = paths.folder_pointcloud_ms
+        
+        assert exclude_neutral == True
+        
+        self.identities, self.names= self.extract_filenames()
+        self.ids = list(self.identities.keys())
+    
+        # specific attributes
+        self.labels = self.load_labels()
+        # self.labels = []
+        self.labels_mean = paths.load_exp_mean()
+        self.labels_std = paths.load_exp_std()
+    
+    def get_img_file(self, name, resolution):
+        return os.path.join(self.root_geo.format(resolution), f"{name}_pointcloud.exr")
+        
+    def get_label_file(self, name):
+        return os.path.join(self.root_expw, f"{name}_BSweights.mat")
+    
+    def get_neutral_file(self, name, resolution):
+        neutral_id = name.split("_01_blendshape_")[0]
+        img_neutral_path = os.path.join(self.root_geo_neutral.format(resolution),
+                                        f"{neutral_id}_01_pointcloud.exr")
+        return img_neutral_path
+    
+    def load_labels(self):
+        labels = []
+        print ("loading labels ...")
+        for id, names in tqdm.tqdm(self.identities.items()):
+            for name in names:
+                label = torch.from_numpy(load_mat(self.get_label_file(name), "BSweights")).float() 
+                labels.append((label))
+        return labels
+        
+    def sample_label(self, k=1, randn=False):
+        # return [k * label_size]
+        if randn:
+            mean = torch.from_numpy(self.labels_mean).unsqueeze(0).repeat(k, 1)
+            std = torch.from_numpy(self.labels_std).unsqueeze(0).repeat(k, 1)
+            return torch.normal(mean=mean, std=std)
+            
+        else:
+            labels = random.choices(self.labels, k=k)
+            labels_cls = torch.stack([label_cls for (label_cls, label_reg) in labels])
+            labels_reg = torch.stack([label_reg for (label_cls, label_reg) in labels])
+            return labels_cls, labels_reg
+    
+    def extract_filenames(self):
+        files_geo = os.listdir(self.root_geo.format("64"))
+        files_expw = os.listdir(self.root_expw)
+        
+        names = [f.replace("_pointcloud.exr", "") for f in files_geo if f.replace("_pointcloud.exr", "_BSweights.mat") in files_expw]
+        identities = {}        
+        
+        for name in names:
+            identity = name.split("_01_blendshape_")[0]
+            print (self.get_neutral_file(name, 64))
+            if not os.path.exists(self.get_neutral_file(name, 64)):
+                continue
+            if identity not in identities:
+                identities[identity] = []
+            identities[identity].append(name)
+                
+        return identities, names
+    
+
+# class MultiResolutionDataset(BaseDataset):
 # class MultiResolutionDataset(FWHDataset):
+class MultiResolutionDataset(FWHRandDataset):
     def __init__(self, resolution=8, return_neutral=False, sameID=True, exclude_neutral=True):
         super().__init__(exclude_neutral=exclude_neutral)
         self.sameID = sameID
@@ -262,7 +347,7 @@ class MultiResolutionDataset(BaseDataset):
             imgs = [img-img_neutral for img, img_neutral in zip(imgs, imgs_neutral)]
             
         labels_path = [self.get_label_file(name) for name in names]
-        labels = [torch.from_numpy(load_mat(label_path, "BSweights"))[:, 0].float() for label_path in labels_path]
+        labels = [torch.from_numpy(load_mat(label_path, "BSweights"))[0, ].float() for label_path in labels_path]
 #         labels_cls = [int(label_path.split("_blendshape_")[1][0:2]) - 1 for label_path in labels_path]
 #         labels_reg = [label[0, label_cls] for label, label_cls in zip(labels, labels_cls)]
         
@@ -270,14 +355,70 @@ class MultiResolutionDataset(BaseDataset):
         return imgs[0], labels[0]
         # return imgs[0], labels[0], imgs[1], labels[1] 
 
+    
+    
+##########################################################################
+## new
+##########################################################################
+class MultiResolutionDataset():
+    def __init__(self, resolution=64, exclude_neutral=True):
+        self.resolution = resolution
+        self.exclude_neutral = exclude_neutral
+        
+        self.labels = sorted(glob.glob(paths.file_exp_weights))
+        self.images = sorted(glob.glob(paths.file_exp_pointcloud_ms.format(resolution)))
+        self.neutral_images = []
+        for f in self.images:
+            neutral_f = f.replace(paths.folder_exp_pointcloud_ms.format(resolution),
+                                  paths.folder_pointcloud_ms.format(resolution))
+            neutral_f = neutral_f.split("_blendshape_")[0]
+            neutral_f = neutral_f[:-2] + "01_pointcloud.exr"
+            assert os.path.exists(neutral_f)
+            self.neutral_images.append(neutral_f)
+            
+        self.labels_mean = paths.load_exp_mean()
+        self.labels_std = paths.load_exp_std()
+            
+        self.length = len(self.labels)
+        
+    def __len__(self):
+        return 10_000_000
+    
+    def sample_label(self, k=1, randn=True):
+        # return [k * label_size]
+        mean = torch.from_numpy(self.labels_mean).unsqueeze(0).repeat(k, 1)
+        std = torch.from_numpy(self.labels_std).unsqueeze(0).repeat(k, 1)
+        return torch.normal(mean=mean, std=std).float()
+            
+    def getitem_neutral(self, index=None, rand=False):
+        if rand == True:
+            file = random.choice(self.neutral_images)
+        else:
+            index = index % self.length
+            file = self.neutral_images[index]
+        img_neutral = To_tensor(load_img(file)) 
+        return img_neutral
+    
+    def __getitem__(self, index):
+        index = index % self.length
+        
+        img = To_tensor(load_img(self.images[index]))
+        
+        if self.exclude_neutral:
+            img_neutral = To_tensor(load_img(self.neutral_images[index]))
+            img -= img_neutral
+            
+        label = torch.from_numpy(load_mat(self.labels[index], "BSweights"))[0, ]
+        return img.float(), label.float()
+    
+    
+    
+    
+    
 if __name__ == "__main__":
-    #FWHDataset.process()
-    
-    
-    dataset = MultiResolutionDataset(resolution=64, exclude_neutral=True)
+    dataset = MultiResolutionDataset()
 
-    labels = dataset.sample_label(k=10)
-    print (labels.shape)
+    print (dataset.sample_label(10).shape)
     
     img, label = dataset[0]
     for i in range(10):
