@@ -436,7 +436,6 @@ class MultiResolutionDataset():
     
     def __getitem__(self, index):
         index = index % self.length
-        print (self.images[index])
         img = To_tensor(load_img(self.images[index]))
         
         if self.exclude_neutral:
