@@ -70,7 +70,7 @@ def _check(pointclouds, albedos):
         assert os.path.exists(pointcloud)
         if albedo in albedos:
             pointclouds_valid.append(pointcloud)
-            albedos_valid.append(albedos)
+            albedos_valid.append(albedo)
     return pointclouds_valid, albedos_valid
     
 if __name__ == '__main__':
