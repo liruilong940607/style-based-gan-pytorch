@@ -158,10 +158,10 @@ if __name__ == "__main__":
     label_size = 25
     
     if args.trainExp:
-        for step in [6, 8]:
+        for step in [8]:
             resolution = 4 * 2 ** step
             monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
-            ckpt = torch.load(f'checkpoint/monitorExp/resolution-{2 ** step}-iter-{19999}.model')
+            ckpt = torch.load(f'checkpoint/monitorExp/resolution-{2 ** step}-iter-{8000}.model')
             monitorExp.module.load_state_dict(ckpt['model'])
             batch_size = args.batch.get(resolution, 32) * 16
             monitorID = train_monitorExp(monitorExp, resolution, batch_size)

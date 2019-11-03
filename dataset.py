@@ -406,12 +406,33 @@ class MultiResolutionDataset():
             
     def getitem_neutral(self, index=None, rand=False):
         if rand == True:
-            file = random.choice(self.neutral_images)
+            neutral_images = glob.glob(paths.file_pointcloud_neutral_ms.format(self.resolution))
+            file = random.choice(neutral_images)
         else:
             index = index % self.length
             file = self.neutral_images[index]
         img_neutral = To_tensor(load_img(file)) 
+        if random.random() < 0.5:
+            img_neutral = self.flip_img(img_neutral)
         return img_neutral
+    
+    def flip_img(self, tensor):
+        # [c,h,w]
+        tensor = tensor.clone()
+        inv_idx = torch.arange(tensor.size(2)-1, -1, -1).long()
+        tensor = tensor[:, :, inv_idx]
+        tensor[0, :, :] *= -1
+        return tensor
+    
+    def flip_label(self, tensor):
+        # [25,]
+        tensor = tensor.clone()
+        idxs_left = [22]
+        idxs_right = [24]
+        tensor_left = tensor[idxs_left].clone()
+        tensor[idxs_left] = tensor[idxs_right]
+        tensor[idxs_right] = tensor_left
+        return tensor
     
     def __getitem__(self, index):
         index = index % self.length
@@ -423,6 +444,11 @@ class MultiResolutionDataset():
             img -= img_neutral
             
         label = torch.from_numpy(load_mat(self.labels[index], "BSweights"))[0, ]
+        
+        if random.random() < 0.5:
+            img = self.flip_img(img)
+            label = self.flip_label(label)
+        
         return img.float(), label.float()
     
     
@@ -432,11 +458,11 @@ class MultiResolutionDataset():
 if __name__ == "__main__":
     dataset = MultiResolutionDataset()
 
-    print (dataset.sample_label(10).shape)
+#     print (dataset.sample_label(10).shape)
     
-    img, label = dataset[0]
-    for i in range(10):
-        img_neutral = dataset.getitem_neutral(rand=True)
+#     img, label = dataset[0]
+#     for i in range(10):
+#         img_neutral = dataset.getitem_neutral(rand=True)
         
-        #save_img(f"test_rand_add_neutral/{i}.exr", To_numpy(img + img_neutral))
-        save_mat(f"test_rand_add_neutral/{i}.mat", To_numpy(img + img_neutral), "data")
+#         #save_img(f"test_rand_add_neutral/{i}.exr", To_numpy(img + img_neutral))
+#         save_mat(f"test_rand_add_neutral/{i}.mat", To_numpy(img + img_neutral), "data")

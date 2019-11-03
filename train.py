@@ -242,7 +242,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 1000 == 0:
+        if (i + 1) % 200 == 0:
             nsample = 5
             with torch.no_grad():
                 for isample in range(nsample):
@@ -302,10 +302,10 @@ if __name__ == '__main__':
     parser.add_argument('--init_size', default=256, type=int, help='initial image size')
     parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
-        '--ckpt', default='./train_Offset_1000xExp_iter-9999.model', type=str, help='load from previous checkpoints'
+        '--ckpt', default='./checkpoint/generation/train_Offset_1000xExp_iter-9999.model', type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default='./resolution-256-iter-8000.model', type=str,
+        '--ckptExp', default='./checkpoint/monitorExp/resolution-256-iter-8000.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
