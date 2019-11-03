@@ -1,100 +1,94 @@
 import argparse
 import math
+import os
+import numpy as np
+import scipy.io
+import imageio
+import shutil
+import tqdm
 
 import torch
 from torchvision import utils
 
 from model import StyledGenerator
+from dataset import MultiResolutionDataset
+
+#############################################################
+# Common Utils
+#############################################################
+def To_tensor(img):
+    return torch.from_numpy(img.transpose(2, 0, 1)).float()
+
+def To_numpy(tensor):
+    return tensor.detach().cpu().numpy().transpose(1, 2, 0)
 
 
-@torch.no_grad()
-def get_mean_style(generator, device):
-    mean_style = None
+def load_img(filename):
+    return imageio.imread(filename, format='EXR-FI')
 
-    for i in range(10):
-        style = generator.mean_style(torch.randn(1024, 512).to(device))
+def save_img(filename_out, img, skip_if_exist=False):    
+    if skip_if_exist and os.path.exists(filename_out):
+        return
+    os.makedirs(os.path.dirname(filename_out), exist_ok=True)
+    imageio.imwrite(filename_out, img, format='EXR-FI')
 
-        if mean_style is None:
-            mean_style = style
-
-        else:
-            mean_style += style
-
-    mean_style /= 10
-    return mean_style
-
-@torch.no_grad()
-def sample(generator, step, mean_style, n_sample, device):
-    image = generator(
-        torch.randn(n_sample, 512).to(device),
-        step=step,
-        alpha=1,
-        mean_style=mean_style,
-        style_weight=0.7,
-    )
     
-    return image
+def load_mat(filename, key):
+    return scipy.io.loadmat(filename)[key]
 
-@torch.no_grad()
-def style_mixing(generator, step, mean_style, n_source, n_target, device):
-    source_code = torch.randn(n_source, 512).to(device)
-    target_code = torch.randn(n_target, 512).to(device)
-    
-    shape = 4 * 2 ** step
-    alpha = 1
+def save_mat(filename_out, data, key, skip_if_exist=False):
+    if skip_if_exist and os.path.exists(filename_out):
+        return
+    os.makedirs(os.path.dirname(filename_out), exist_ok=True)
+    scipy.io.savemat(filename_out, {key: data})
 
-    images = [torch.ones(1, 3, shape, shape).to(device) * -1]
-
-    source_image = generator(
-        source_code, step=step, alpha=alpha, mean_style=mean_style, style_weight=0.7
-    )
-    target_image = generator(
-        target_code, step=step, alpha=alpha, mean_style=mean_style, style_weight=0.7
-    )
-
-    images.append(source_image)
-
-    for i in range(n_target):
-        image = generator(
-            [target_code[i].unsqueeze(0).repeat(n_source, 1), source_code],
-            step=step,
-            alpha=alpha,
-            mean_style=mean_style,
-            style_weight=0.7,
-            mixing_range=(0, 1),
-        )
-        images.append(target_image[i].unsqueeze(0))
-        images.append(image)
-
-    images = torch.cat(images, 0)
-    
-    return images
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--size', type=int, default=1024, help='size of the image')
-    parser.add_argument('--n_row', type=int, default=3, help='number of rows of sample matrix')
-    parser.add_argument('--n_col', type=int, default=5, help='number of columns of sample matrix')
-    parser.add_argument('path', type=str, help='path to checkpoint file')
+    parser.add_argument('--size', type=int, default=64, help='size of the image')
+    parser.add_argument('--dim', type=int, default=None)
+    parser.add_argument('--N', type=int, default=5)
+    parser.add_argument('--ckpt', type=str)
     
     args = parser.parse_args()
     
     device = 'cuda'
-
-    generator = StyledGenerator(512).to(device)
-    generator.load_state_dict(torch.load(args.path)['g_running'])
-    generator.eval()
-
-    mean_style = get_mean_style(generator, device)
-
+    code_size = 512
+    label_size = 25
     step = int(math.log(args.size, 2)) - 2
     
-    img = sample(generator, step, mean_style, args.n_row * args.n_col, device)
-    utils.save_image(img, 'sample.png', nrow=args.n_col, normalize=True, range=(-1, 1))
+    generator = StyledGenerator(code_size, label_dim=label_size).to(device)
+    generator.load_state_dict(torch.load(args.ckpt)['g_running'])
+    generator.eval()
+
+    dataset = MultiResolutionDataset(resolution=args.size, exclude_neutral=True)
+    neutral = dataset.getitem_neutral(rand=True)
+    neutral = neutral.unsqueeze(0).cuda()
+    mean = torch.from_numpy(dataset.labels_mean).float()
     
-    for j in range(20):
-        img = style_mixing(generator, step, mean_style, args.n_col, args.n_row, device)
-        utils.save_image(
-            img, f'sample_mixing_{j}.png', nrow=args.n_col + 1, normalize=True, range=(-1, 1)
-        )
+    if args.dim is None:
+        dims = list(range(label_size))
+    else:
+        dims = [args.dim]
+
+    for dim in tqdm.tqdm(dims):
+        sample_dir = f"./sample/resolution-{args.size}/dim-{dim}/"
+        os.makedirs(sample_dir, exist_ok=True)
+    
+        std = dataset.labels_std[dim] * 5
+        gen_in = torch.ones((1, label_size), dtype=torch.float32) * mean
+        values = np.linspace(-std, std, args.N)
+        for i in range(args.N):
+            gen_in[0, dim] = values[i]
+            gen_in = gen_in.to(device)
+            print (f"value:{values[i]}, dim:{dim}, gen_in: {gen_in}")
+
+            fake_image = generator(gen_in, step=step, alpha=1.0)
+            fake_image = fake_image + neutral
+
+            fake_image = To_numpy(fake_image[0])
+            save_mat(os.path.join(sample_dir, f'{i}.mat'), fake_image, "data")
+            save_img(os.path.join(sample_dir, f'{i}.exr'), fake_image)
+        
+    shutil.make_archive(f"./sample/resolution-{args.size}", 'zip', f"./sample/resolution-{args.size}/")
