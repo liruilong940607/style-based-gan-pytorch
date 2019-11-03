@@ -436,7 +436,7 @@ class MultiResolutionDataset():
     
     def __getitem__(self, index):
         index = index % self.length
-        
+        print (self.images[index])
         img = To_tensor(load_img(self.images[index]))
         
         if self.exclude_neutral:
@@ -444,11 +444,6 @@ class MultiResolutionDataset():
             img -= img_neutral
             
         label = torch.from_numpy(load_mat(self.labels[index], "BSweights"))[0, ]
-        
-        if random.random() < 0.5:
-            img = self.flip_img(img)
-            label = self.flip_label(label)
-        
         return img.float(), label.float()
     
     
@@ -457,7 +452,17 @@ class MultiResolutionDataset():
     
 if __name__ == "__main__":
     dataset = MultiResolutionDataset()
-
+    
+    t = torch.tensor([-0.23,  0.18, -0.09, -0.03, -0.36,  0.63,  0.4,  -0.27, -0.,    0.42, -0.52,  0.13,
+                      -0.35, -0.6 ,  0.03 , 0.28 , 0.09 , 0.03 ,-0.28, -0.03,  0.51,  0.58, -0.38,  0.21,
+                      -0.43])
+    
+    for i in range(10000000):
+        img, label = dataset[i]
+        if (label-t).abs().mean() < 0.03:
+            print (label)
+            break
+        
 #     print (dataset.sample_label(10).shape)
     
 #     img, label = dataset[0]
