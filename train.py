@@ -147,7 +147,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_step-{ckpt_step}.model',
+                f'checkpoint/{resolution}_train_step-{ckpt_step}.model',
             )
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
@@ -222,8 +222,13 @@ def train(args, dataset, generator, discriminator, monitorExp):
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
             if args.loss == 'wgan-gp':
-                loss = -predict.mean() + loss_exp.mean() *1000
-
+                if i < 20000:
+                    loss_weight = 10
+                else:
+                    loss_weight = 1000
+                    
+                loss = -predict.mean() + loss_exp.mean() * loss_weight
+                    
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
 
@@ -237,7 +242,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 200 == 0:
+        if (i + 1) % 1000 == 0:
             nsample = 5
             with torch.no_grad():
                 for isample in range(nsample):
@@ -267,7 +272,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     'd_optimizer': d_optimizer.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
-                f'checkpoint/train_Offset_1000xExp_iter-{i}.model',
+                f'checkpoint/{resolution}_train_Offset_{loss_weight}xExp_iter-{i}.model',
             )
 
         state_msg = (
@@ -294,13 +299,13 @@ if __name__ == '__main__':
     )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', default=True, help='use lr scheduling')
-    parser.add_argument('--init_size', default=64, type=int, help='initial image size')
-    parser.add_argument('--max_size', default=64, type=int, help='max image size')
+    parser.add_argument('--init_size', default=256, type=int, help='initial image size')
+    parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
-        '--ckpt', default=None, type=str, help='load from previous checkpoints'
+        '--ckpt', default='./train_Offset_1000xExp_iter-9999.model', type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default='./monitorExp-25-Rand-step-4-iter-19999.model', type=str,
+        '--ckptExp', default='./resolution-256-iter-8000.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
@@ -368,13 +373,13 @@ if __name__ == '__main__':
 #         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
 #         args.phase = 1200_000
 
-#         # 2 GPU
-#         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
-#         args.phase = 1200_000
-
-        # 4 GPU
-        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        # 2 GPU
+        args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
         args.phase = 1200_000
+
+#         # 4 GPU
+#         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+#         args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
