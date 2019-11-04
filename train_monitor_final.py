@@ -72,7 +72,7 @@ def train_monitorExp(model, resolution, batch_size):
 #     img_mean, img_min, img_max = calc_region_range(resolution)
 #     print (img_mean.min(), img_mean.max())
     
-    pbar = tqdm(range(20_000))
+    pbar = tqdm(range(40_000))
     errorQue = deque(maxlen=50)
     for i in pbar:        
 #         neutral = dataset.getitem_neutral(rand=True)
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     label_size = 25
     
     if args.trainExp:
-        for step in [4]:
+        for step in [6]:
             resolution = 4 * 2 ** step
             monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, in_channel=6, out_channel=label_size)).cuda()
 #             ckpt = torch.load(f'checkpoint/monitorExp/resolution-{2 ** step}-iter-{8000}.model')

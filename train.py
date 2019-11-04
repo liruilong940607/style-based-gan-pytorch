@@ -111,6 +111,12 @@ def train(args, dataset, generator, discriminator, monitorExp):
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = True
     
+    #Exp
+    mask = imageio.imread("/home/ICT2000/rli/mnt/glab2/ForRuilong/FaceEncoding_process2/mask_key.png")[:, :, 0]
+    mask = cv2.resize(mask, (resolution, resolution), cv2.INTER_NEAREST)
+    mask_eye = torch.from_numpy(np.logical_or(mask == 60, mask == 230)).float().unsqueeze(0).unsqueeze(0).cuda()
+    mask_other = torch.from_numpy(np.logical_and(mask != 60, mask != 230)).float().unsqueeze(0).unsqueeze(0).cuda()
+        
     for i in pbar:
         discriminator.zero_grad()
 
@@ -218,6 +224,10 @@ def train(args, dataset, generator, discriminator, monitorExp):
             predict = discriminator(fake_image + neutral, step=step, alpha=alpha)
             
             # monitor Exp
+            img_eye = fake_image * mask_eye * 100
+            img_other = fake_image * mask_other
+            fake_image = torch.cat([img_eye, img_other], dim=1)
+        
             predict_exp = monitorExp(fake_image, step=step, alpha=1.0)
             loss_exp = nn.MSELoss()(predict_exp, fake_label2.detach())
             
@@ -249,7 +259,11 @@ def train(args, dataset, generator, discriminator, monitorExp):
                     label_code = real_label[isample:isample+1].cuda()
                     image = g_running(label_code, step=step, alpha=alpha)
                     score = discriminator.module(image + neutral, step=step, alpha=alpha)
-                    weight = monitorExp.module(image, step=step, alpha=1.0)
+                    
+                    img_eye = image * mask_eye * 100
+                    img_other = image * mask_other
+                    image_m = torch.cat([img_eye, img_other], dim=1)
+                    weight = monitorExp.module(image_m, step=step, alpha=1.0)
                 
                     image = image.data.cpu().numpy()[0].transpose(1, 2, 0)
                     image += neutral.data.cpu().numpy()[0].transpose(1, 2, 0)
@@ -299,13 +313,13 @@ if __name__ == '__main__':
     )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', default=True, help='use lr scheduling')
-    parser.add_argument('--init_size', default=256, type=int, help='initial image size')
-    parser.add_argument('--max_size', default=256, type=int, help='max image size')
+    parser.add_argument('--init_size', default=64, type=int, help='initial image size')
+    parser.add_argument('--max_size', default=64, type=int, help='max image size')
     parser.add_argument(
-        '--ckpt', default='./checkpoint/generation/train_Offset_1000xExp_iter-9999.model', type=str, help='load from previous checkpoints'
+        '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default='./checkpoint/monitorExp/resolution-256-iter-8000.model', type=str,
+        '--ckptExp', default='./checkpoint/monitorExp/resolution-64-iter-19000.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
@@ -327,7 +341,7 @@ if __name__ == '__main__':
 
     generator = nn.DataParallel(StyledGenerator(code_size, label_dim=label_size)).cuda()
     discriminator = nn.DataParallel(Discriminator(from_rgb_activate=not args.no_from_rgb_activate)).cuda()
-    monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, out_channel=label_size)).cuda()
+    monitorExp = nn.DataParallel(Discriminator(from_rgb_activate=True, in_channel=6, out_channel=label_size)).cuda()
     ckpt = torch.load(args.ckptExp)
     monitorExp.module.load_state_dict(ckpt['model'])
     g_running = StyledGenerator(code_size, label_dim=label_size).cuda()
@@ -373,13 +387,13 @@ if __name__ == '__main__':
 #         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
 #         args.phase = 1200_000
 
-        # 2 GPU
-        args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
-        args.phase = 1200_000
-
-#         # 4 GPU
-#         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+#         # 2 GPU
+#         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
 #         args.phase = 1200_000
+
+        # 4 GPU
+        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
