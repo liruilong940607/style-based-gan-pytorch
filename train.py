@@ -233,7 +233,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             
             if args.loss == 'wgan-gp':
                 if i < 20000:
-                    loss_weight = 10
+                    loss_weight = 1000
                 else:
                     loss_weight = 1000
                     
@@ -313,13 +313,13 @@ if __name__ == '__main__':
     )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', default=True, help='use lr scheduling')
-    parser.add_argument('--init_size', default=64, type=int, help='initial image size')
-    parser.add_argument('--max_size', default=64, type=int, help='max image size')
+    parser.add_argument('--init_size', default=256, type=int, help='initial image size')
+    parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
-        '--ckptExp', default='./checkpoint/monitorExp/resolution-64-iter-19000.model', type=str,
+        '--ckptExp', default='./checkpoint/monitorExp/resolution-256-iter-23000.model', type=str,
     )
     parser.add_argument(
         '--no_from_rgb_activate',
@@ -387,13 +387,13 @@ if __name__ == '__main__':
 #         args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
 #         args.phase = 1200_000
 
-#         # 2 GPU
-#         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
-#         args.phase = 1200_000
-
-        # 4 GPU
-        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+        # 2 GPU
+        args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 64, 256: 64}
         args.phase = 1200_000
+
+#         # 4 GPU
+#         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
+#         args.phase = 1200_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
