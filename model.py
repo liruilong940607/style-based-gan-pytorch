@@ -391,15 +391,15 @@ class Generator(nn.Module):
 
         self.to_rgb = nn.ModuleList(
             [
-                EqualConv2d(512, 6, 1),
-                EqualConv2d(512, 6, 1),
-                EqualConv2d(512, 6, 1),
-                EqualConv2d(512, 6, 1),
-                EqualConv2d(256, 6, 1),
-                EqualConv2d(128, 6, 1),
-                EqualConv2d(64, 6, 1),
-                EqualConv2d(32, 6, 1),
-                EqualConv2d(16, 6, 1),
+                EqualConv2d(512, 3, 1),
+                EqualConv2d(512, 3, 1),
+                EqualConv2d(512, 3, 1),
+                EqualConv2d(512, 3, 1),
+                EqualConv2d(256, 3, 1),
+                EqualConv2d(128, 3, 1),
+                EqualConv2d(64, 3, 1),
+                EqualConv2d(32, 3, 1),
+                EqualConv2d(16, 3, 1),
             ]
         )
 
@@ -526,10 +526,10 @@ class Discriminator(nn.Module):
 
         def make_from_rgb(out_channel):
             if from_rgb_activate:
-                return nn.Sequential(EqualConv2d(6, out_channel, 1), nn.LeakyReLU(0.2))
+                return nn.Sequential(EqualConv2d(3, out_channel, 1), nn.LeakyReLU(0.2))
 
             else:
-                return EqualConv2d(6, out_channel, 1)
+                return EqualConv2d(3, out_channel, 1)
 
         self.from_rgb = nn.ModuleList(
             [

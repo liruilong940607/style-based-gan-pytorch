@@ -16,6 +16,8 @@ from torchvision import datasets, transforms, utils
 from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 
+import imageio
+
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -42,7 +44,22 @@ def adjust_lr(optimizer, lr):
         mult = group.get('mult', 1)
         group['lr'] = lr * mult
 
-
+        
+def calc_region_range(dataset):
+    image_size = dataset.resolution
+    
+    dataset.resolution = 512
+    data_loader = iter(DataLoader(dataset, shuffle=False, batch_size=16, num_workers=16))
+    img = torch.cat([next(data_loader) for _ in range(100)], dim=0)
+    img_mean = img.mean(dim=0, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
+    img_min = img.min(dim=0, keepdim=True)[0].min(dim=2, keepdim=True)[0].min(dim=3, keepdim=True)[0]
+    img_max = img.max(dim=0, keepdim=True)[0].max(dim=2, keepdim=True)[0].max(dim=3, keepdim=True)[0]
+    
+    dataset.resolution = image_size
+    return img_mean, img_min, img_max
+    
+    
+        
 def train(args, dataset, generator, discriminator):
     step = int(math.log2(args.init_size)) - 2
     resolution = 4 * 2 ** step
@@ -68,7 +85,9 @@ def train(args, dataset, generator, discriminator):
 
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = False
-
+    
+    img_mean, img_min, img_max = calc_region_range(dataset)
+    print (f"[drange] min: {img_min}; max: {img_max}; mean: {img_mean}")
     for i in pbar:
         discriminator.zero_grad()
 
@@ -110,6 +129,7 @@ def train(args, dataset, generator, discriminator):
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
+            
 
         try:
             real_image = next(data_loader)
@@ -117,6 +137,8 @@ def train(args, dataset, generator, discriminator):
         except (OSError, StopIteration):
             data_loader = iter(loader)
             real_image = next(data_loader)
+            
+#         real_image = (real_image - img_mean) / (img_max - img_min + 1e-10)
 
         used_sample += real_image.shape[0]
 
@@ -220,8 +242,8 @@ def train(args, dataset, generator, discriminator):
                     image = g_running(
                         latent_code, step=step, alpha=alpha
                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 0:3], format='EXR-FI')
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 3:6], format='EXR-FI')
+#                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 0:3], format='EXR-FI')
+                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 0:3], format='EXR-FI')
                     
 
         if (i + 1) % 2000 == 0:
@@ -324,7 +346,7 @@ if __name__ == '__main__':
         ]
     )
 
-    dataset = MultiResolutionDataset(args.path, transform)
+    dataset = MultiResolutionDataset(args.path, transform, args.init_size)
 
     if args.sched:
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}

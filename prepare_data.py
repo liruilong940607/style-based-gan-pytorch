@@ -84,8 +84,9 @@ if __name__ == '__main__':
     albedo_ls = "/home/ICT2000/rli/mnt/vgldb1/LightStageFaceDB/Datasets/FaceEncoding/DiffuseAlbedo/*_01_diffuse_albedo.exr"
 
     pointcloud_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/PointCloud_Aligned/Age*-*_01_*_pointcloud.exr"
-    albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/DiffuseAlbedo/Age*-*_01_*_diffuse_albedo.exr"
-
+#     albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/DiffuseAlbedo/Age*-*_01_*_diffuse_albedo.exr"
+    albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingDataV2/DiffuseAlbedo_sRGB/Age*-*_01_*_diffuse_albedo.exr"
+    
     pointcloud_lso = "/home/ICT2000/rli/mnt/vgldb1/OldLightStageDataTransfer/TrainingData/PointCloud_Aligned/*_1_pointcloud.exr"
     albedo_lso = "/home/ICT2000/rli/mnt/vgldb1/OldLightStageDataTransfer/TrainingData/DiffuseAlbedo/*_1_diffuse_albedo.exr"
     
