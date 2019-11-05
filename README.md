@@ -52,4 +52,4 @@ Resolution | Model & Optimizer | Running average of generator
 
 Old version of checkpoints. As gradient penalty and discriminator activations are different, it is better to use new checkpoints to do some training. But you can use these checkpoints to make samples as generator architecture is not changed.
 
-Running average of generator is saved at the specified iterations. So these two are saved at different iterations. (Yes, this is my mistake.)
+Running average of generator is saved at the specified iterations. So these two are saved at different iterations. (Yes, this is my mistake.)CUDA_VISIBLE_DEVICES=0,1 python train.py (on ARYA to iter 9k: '256_train_Offset_1000xExp_iter-8999.model')
