@@ -291,7 +291,7 @@ class NoiseInjection(nn.Module):
         self.weight = nn.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, image, noise):
-        return image + self.weight * noise * 0
+        return image + self.weight * noise
 
 
 class ConstantInput(nn.Module):
@@ -314,7 +314,7 @@ class StyledConvBlock(nn.Module):
         out_channel,
         kernel_size=3,
         padding=1,
-        style_dim=512,
+        style_dim=1024,
         initial=False,
         upsample=False,
         fused=False,
@@ -356,6 +356,11 @@ class StyledConvBlock(nn.Module):
         self.noise2 = equal_lr(NoiseInjection(out_channel))
         self.adain2 = AdaptiveInstanceNorm(out_channel, style_dim)
         self.lrelu2 = nn.LeakyReLU(0.2)
+        
+        self.conv3 = EqualConv2d(out_channel, out_channel, kernel_size, padding=padding)
+        self.noise3 = equal_lr(NoiseInjection(out_channel))
+        self.adain3 = AdaptiveInstanceNorm(out_channel, style_dim)
+        self.lrelu3 = nn.LeakyReLU(0.2)
 
     def forward(self, input, style, noise):
         out = self.conv1(input)
@@ -367,19 +372,24 @@ class StyledConvBlock(nn.Module):
         out = self.noise2(out, noise)
         out = self.lrelu2(out)
         out = self.adain2(out, style)
+        
+        out = self.conv3(out)
+        out = self.noise3(out, noise)
+        out = self.lrelu3(out)
+        out = self.adain3(out, style)
 
         return out
 
 
 class Generator(nn.Module):
-    def __init__(self, code_dim, fused=True):
+    def __init__(self, code_dim=1024, fused=True):
         super().__init__()
 
         self.progression = nn.ModuleList(
             [
-                StyledConvBlock(512, 512, 3, 1, initial=True),  # 4
-                StyledConvBlock(512, 512, 3, 1, upsample=True),  # 8
-                StyledConvBlock(512, 512, 3, 1, upsample=True),  # 16
+                StyledConvBlock(1024, 1024, 3, 1, initial=True),  # 4
+                StyledConvBlock(1024, 1024, 3, 1, upsample=True),  # 8
+                StyledConvBlock(1024, 512, 3, 1, upsample=True),  # 16
                 StyledConvBlock(512, 512, 3, 1, upsample=True),  # 32
                 StyledConvBlock(512, 256, 3, 1, upsample=True),  # 64
                 StyledConvBlock(256, 128, 3, 1, upsample=True, fused=fused),  # 128
@@ -391,15 +401,15 @@ class Generator(nn.Module):
 
         self.to_rgb = nn.ModuleList(
             [
-                EqualConv2d(512, 3, 1),
-                EqualConv2d(512, 3, 1),
-                EqualConv2d(512, 3, 1),
-                EqualConv2d(512, 3, 1),
-                EqualConv2d(256, 3, 1),
-                EqualConv2d(128, 3, 1),
-                EqualConv2d(64, 3, 1),
-                EqualConv2d(32, 3, 1),
-                EqualConv2d(16, 3, 1),
+                EqualConv2d(1024, 6, 1),
+                EqualConv2d(1024, 6, 1),
+                EqualConv2d(512, 6, 1),
+                EqualConv2d(512, 6, 1),
+                EqualConv2d(256, 6, 1),
+                EqualConv2d(128, 6, 1),
+                EqualConv2d(64, 6, 1),
+                EqualConv2d(32, 6, 1),
+                EqualConv2d(16, 6, 1),
             ]
         )
 
@@ -452,18 +462,16 @@ class Generator(nn.Module):
 
 
 class StyledGenerator(nn.Module):
-    def __init__(self, code_dim=512, n_mlp=8, label_dim=25):
+    def __init__(self, code_dim=1024, n_mlp=8):
         super().__init__()
 
         self.generator = Generator(code_dim)
 
-        layers = []
+        layers = [PixelNorm()]
         for i in range(n_mlp):
-            if i == 0:
-                layers.append(EqualLinear(label_dim, code_dim))
-            else:
-                layers.append(EqualLinear(code_dim, code_dim))
+            layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
+
         self.style = nn.Sequential(*layers)
 
     def forward(
@@ -509,7 +517,7 @@ class StyledGenerator(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, fused=True, from_rgb_activate=False, in_channel=3, out_channel=1):
+    def __init__(self, fused=True, from_rgb_activate=False, in_channel=6, out_channel=1):
         super().__init__()
 
         self.progression = nn.ModuleList(
@@ -520,9 +528,9 @@ class Discriminator(nn.Module):
                 ConvBlock(128, 256, 3, 1, downsample=True, fused=fused),  # 64
                 ConvBlock(256, 512, 3, 1, downsample=True),  # 32
                 ConvBlock(512, 512, 3, 1, downsample=True),  # 16
-                ConvBlock(512, 512, 3, 1, downsample=True),  # 8
-                ConvBlock(512, 512, 3, 1, downsample=True),  # 4
-                ConvBlock(513, 512, 3, 1, 4, 0),
+                ConvBlock(512, 1024, 3, 1, downsample=True),  # 8
+                ConvBlock(1024, 1024, 3, 1, downsample=True),  # 4
+                ConvBlock(1025, 1024, 3, 1, 4, 0),
             ]
         )
 
@@ -542,8 +550,8 @@ class Discriminator(nn.Module):
                 make_from_rgb(256),
                 make_from_rgb(512),
                 make_from_rgb(512),
-                make_from_rgb(512),
-                make_from_rgb(512),
+                make_from_rgb(1024),
+                make_from_rgb(1024),
             ]
         )
 
@@ -551,7 +559,7 @@ class Discriminator(nn.Module):
 
         self.n_layer = len(self.progression)
 
-        self.linear = EqualLinear(512, out_channel)
+        self.linear = EqualLinear(1024, out_channel)
 
     def forward(self, input, step=0, alpha=-1):
         for i in range(step, -1, -1):

@@ -46,119 +46,6 @@ def adjust_lr(optimizer, lr):
         group['lr'] = lr * mult
 
 
-def train_monitorID(model, resolution, batch_size):
-    requires_grad(model, True)
-    step = int(math.log2(resolution)) - 2
-    
-    optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.0, 0.99))
-    CEloss = nn.CrossEntropyLoss()
-    
-    dataset_same = MultiResolutionDataset(resolution, sameID=True)
-    dataset_diff = MultiResolutionDataset(resolution, sameID=False)
-    
-    loader_same = iter(DataLoader(dataset_same, shuffle=True, batch_size=batch_size, num_workers=1))
-    loader_diff = iter(DataLoader(dataset_diff, shuffle=True, batch_size=batch_size, num_workers=1))
-    
-    pbar = tqdm(range(20_000))
-    for i in pbar:
-        flag_same = None
-        if random.random() < 0.5:
-            data_loader = loader_same
-            flag_same = True
-        else:
-            data_loader = loader_diff
-            flag_same = False
-        
-        tick = time.time()
-        img1, _, img2, _ = next(data_loader)
-        tock = time.time()
-
-        image = torch.cat([img1, img2], dim=1).cuda()
-        predict = model(image, step=step, alpha=1.0)
-        if flag_same:
-            target = torch.ones(batch_size, dtype=torch.long).cuda()
-        else:
-            target = torch.zeros(batch_size, dtype=torch.long).cuda()
-        
-        model.zero_grad()
-        loss = CEloss(predict, target)
-        loss.backward()
-        optimizer.step()
-            
-        state_msg = (
-            f'[MonitorID] Size: {4 * 2 ** step}; Loss: {loss.item():.3f}; Data: {tock-tick:.3f};'
-        )
-
-        pbar.set_description(state_msg)
-        
-        if i%5000 == 0:
-            torch.save(
-                {
-                    'model': model.module.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                },
-                f'checkpoint/monitorID-step-{step}-iter-{i}.model',
-            )
-
-    torch.save(
-        {
-            'model': model.module.state_dict(),
-            'optimizer': optimizer.state_dict(),
-        },
-        f'checkpoint/monitorID-step-{step}-iter-{i}.model',
-    )
-    requires_grad(model, False)
-    return model
-
-def test_monitorID(ckpt_path, resolution, batch_size):
-    model = nn.DataParallel(Discriminator(from_rgb_activate=True, 
-                                              in_channel=6, out_channel=2)).cuda()
-    ckpt = torch.load(ckpt_path)
-    model.module.load_state_dict(ckpt['model'])
-    
-    requires_grad(model, False)
-    step = int(math.log2(resolution)) - 2
-        
-    dataset_same = MultiResolutionDataset(resolution, sameID=True)
-    dataset_diff = MultiResolutionDataset(resolution, sameID=False)
-    
-    loader_same = iter(DataLoader(dataset_same, shuffle=True, batch_size=batch_size, num_workers=1))
-    loader_diff = iter(DataLoader(dataset_diff, shuffle=True, batch_size=batch_size, num_workers=1))
-    
-    pbar = tqdm(range(1000))
-    pos = 0
-    total = 0
-    for i in pbar:
-        flag_same = None
-        if random.random() < 0.5:
-            data_loader = loader_same
-            flag_same = True
-        else:
-            data_loader = loader_diff
-            flag_same = False
-        
-        tick = time.time()
-        img1, _, img2, _ = next(data_loader)
-        tock = time.time()
-
-        image = torch.cat([img1, img2], dim=1).cuda()
-        predict = model(image, step=step, alpha=1.0)
-        predict = F.softmax(predict, dim=1)
-        predict = predict.argmax(dim=1)
-        if flag_same:
-            target = torch.ones(batch_size, dtype=torch.long).cuda()
-        else:
-            target = torch.zeros(batch_size, dtype=torch.long).cuda()
-        
-        pos += (predict == target).sum().item()
-        total += batch_size
-
-        state_msg = (
-            f'[MonitorID] Size: {4 * 2 ** step}; Accu: {pos/total:.3f}; Data: {tock-tick:.3f};'
-        )
-
-        pbar.set_description(state_msg)
-
 def train_monitorExp(model, resolution, batch_size):
     requires_grad(model, True)
     step = int(math.log2(resolution)) - 2
@@ -168,17 +55,12 @@ def train_monitorExp(model, resolution, batch_size):
     MSEloss = nn.MSELoss()
     CEloss = nn.CrossEntropyLoss()
     
-    dataset = MultiResolutionDataset(resolution, sameID=False, exclude_neutral=True)
+    dataset = MultiResolutionDataset(resolution)
     
     data_loader = iter(DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=12))
-    
-    std = paths.file_exp_meanstd
-    
+        
     pbar = tqdm(range(20_000))
     for i in pbar:        
-#         neutral = dataset.getitem_neutral(rand=True)
-#         neutral = neutral.unsqueeze(0).cuda()
-        
         tick = time.time()
         img, label = next(data_loader)
         tock = time.time()
