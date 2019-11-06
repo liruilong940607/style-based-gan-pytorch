@@ -233,9 +233,9 @@ def train(args, dataset, generator, discriminator, monitorExp):
             
             if args.loss == 'wgan-gp':
                 if i < 20000:
-                    loss_weight = 1000
+                    loss_weight = 10000
                 else:
-                    loss_weight = 1000
+                    loss_weight = 10000
                     
                 loss = -predict.mean() + loss_exp.mean() * loss_weight
                     
@@ -257,6 +257,7 @@ def train(args, dataset, generator, discriminator, monitorExp):
             with torch.no_grad():
                 for isample in range(nsample):
                     label_code = real_label[isample:isample+1].cuda()
+                    
                     image = g_running(label_code, step=step, alpha=alpha)
                     score = discriminator.module(image + neutral, step=step, alpha=alpha)
                     
@@ -311,12 +312,12 @@ if __name__ == '__main__':
         default=600_000,
         help='number of samples used for each training phases',
     )
-    parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.0001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', default=True, help='use lr scheduling')
     parser.add_argument('--init_size', default=256, type=int, help='initial image size')
     parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
-        '--ckpt', default=None, type=str, help='load from previous checkpoints'
+        '--ckpt', default="./256_train_Offset_1000xExp_iter-8999.model", type=str, help='load from previous checkpoints'
     )
     parser.add_argument(
         '--ckptExp', default='./checkpoint/monitorExp/resolution-256-iter-23000.model', type=str,
