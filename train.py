@@ -59,6 +59,9 @@ def calc_region_range(dataset):
     return img_mean, img_min, img_max
     
     
+def exr2rgb(tensor):
+    return (tensor*12.92) * (tensor<=0.0031308).float() + (1.055*(tensor**(1.0/2.4))-0.055) * (tensor>0.0031308).float()
+    
         
 def train(args, dataset, generator, discriminator):
     step = int(math.log2(args.init_size)) - 2
@@ -234,19 +237,39 @@ def train(args, dataset, generator, discriminator):
             requires_grad(generator, False)
             requires_grad(discriminator, True)
 
-        if (i + 1) % 1000 == 0:
-            gen_i, gen_j = 1, 1
-            latent_code = torch.randn(gen_j, code_size).cuda()
-            with torch.no_grad():
-                for idx in range(gen_i):
-                    image = g_running(
-                        latent_code, step=step, alpha=alpha
-                    ).data.cpu().numpy()[0].transpose(1, 2, 0)
-#                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 0:3], format='EXR-FI')
-                    imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 0:3], format='EXR-FI')
+        if (i + 1) % 200 == 0:
+            vis_real = exr2rgb(real_image[:16])
+
+            utils.save_image(
+                vis_real.data.cpu(),
+                f'sample/{str(i + 1).zfill(6)}-real_image.jpg',
+                nrow=4,
+                normalize=True,
+                range=(0, 1),
+            )
+
+            vis_fake = exr2rgb(fake_image[:16])
+
+            utils.save_image(
+                vis_fake.data.cpu(),
+                f'sample/{str(i + 1).zfill(6)}-fake_image.jpg',
+                nrow=4,
+                normalize=True,
+                range=(0, 1),
+            )
+            
+#             gen_i, gen_j = 1, 1
+#             latent_code = torch.randn(gen_j, code_size).cuda()
+#             with torch.no_grad():
+#                 for idx in range(gen_i):
+#                     image = g_running(
+#                         latent_code, step=step, alpha=alpha
+#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
+# #                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 0:3], format='EXR-FI')
+#                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 0:3], format='EXR-FI')
                     
 
-        if (i + 1) % 2000 == 0:
+        if (i + 1) % 1000 == 0:
             torch.save(
                 {
                     'generator': generator.module.state_dict(),
@@ -281,7 +304,7 @@ if __name__ == '__main__':
         default=600_000,
         help='number of samples used for each training phases',
     )
-    parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.004, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', help='use lr scheduling')
     parser.add_argument('--init_size', default=8, type=int, help='initial image size')
     parser.add_argument('--max_size', default=1024, type=int, help='max image size')
@@ -349,11 +372,13 @@ if __name__ == '__main__':
     dataset = MultiResolutionDataset(args.path, transform, args.init_size)
 
     if args.sched:
-        args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
+        # args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
         
         # 4gpu
+        args.lr = {128: 0.006, 256: 0.008, 512: 0.012, 1024: 0.012}
         args.batch = {4: 512, 8: 1024, 16: 512, 32: 128, 64: 64, 128: 32, 256: 32}
+        args.phase = 600_000
 
     else:
         args.lr = {}

@@ -8,6 +8,8 @@ import numpy as np
 import imageio
 import cv2
 
+import random
+
 class MultiResolutionDataset(Dataset):
     def __init__(self, path, transform=None, resolution=8):
         self.env = lmdb.open(
@@ -28,7 +30,7 @@ class MultiResolutionDataset(Dataset):
         self.resolution = resolution
         self.transform = transform
         
-        mask = imageio.imread("face_mask.png")[:, :, 3:4]
+        mask = imageio.imread("face_mask.png")[:, :, -1]
         self.mask_multires = {}
         for res in [8, 16, 32, 64, 128, 256, 512, 1024]:
             self.mask_multires[res] = np.float32(cv2.resize(mask, (res, res), interpolation=cv2.INTER_NEAREST)) / 255.0
@@ -42,8 +44,11 @@ class MultiResolutionDataset(Dataset):
             key = f'{self.resolution}-{str(index).zfill(5)}'.encode('utf-8')
             img = txn.get(key)
             img = np.frombuffer(img, dtype=np.float32)
-            img = img.reshape(self.resolution, self.resolution, 6) * self.mask_multires[self.resolution]
+            img = img.reshape(self.resolution, self.resolution, 6) * self.mask_multires[self.resolution][:, :, np.newaxis]
+            
+            if random.random() < 0.5:
+                img[:, :, 3:6] = img[:, ::-1, 3:6]
             
         img = torch.from_numpy(img.transpose(2, 0, 1)).float()
 
-        return img[0:3, :, :]
+        return img[3:6, :, :]
