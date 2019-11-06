@@ -49,7 +49,7 @@ if __name__ == '__main__':
     parser.add_argument('--size', type=int, default=256, help='size of the image')
     parser.add_argument('--dim', type=int, default=None)
     parser.add_argument('--N', type=int, default=5)
-    parser.add_argument('--ckpt', type=str, default="./checkpoint/256_train_Offset_1000xExp_iter-8999.model")
+    parser.add_argument('--ckpt', type=str, default="./256_train_Offset_10000xExp_iter-10999.model")
     
     args = parser.parse_args()
     
