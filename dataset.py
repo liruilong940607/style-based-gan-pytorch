@@ -32,7 +32,7 @@ class MultiResolutionDataset(Dataset):
         
         mask = imageio.imread("face_mask.png")[:, :, -1]
         self.mask_multires = {}
-        for res in [8, 16, 32, 64, 128, 256, 512, 1024]:
+        for res in [8, 16, 32, 64, 128, 256]:
             self.mask_multires[res] = np.float32(cv2.resize(mask, (res, res), interpolation=cv2.INTER_NEAREST)) / 255.0
 
     def __len__(self):
@@ -46,9 +46,13 @@ class MultiResolutionDataset(Dataset):
             img = np.frombuffer(img, dtype=np.float32)
             img = img.reshape(self.resolution, self.resolution, 6) * self.mask_multires[self.resolution][:, :, np.newaxis]
             
-            if random.random() < 0.5:
-                img[:, :, 3:6] = img[:, ::-1, 3:6]
-            
+        # left right flip
+        if random.random() < 0.5:
+            img = img[:, ::-1, :]
+             # pointcloud
+            img[:, :, 0] *= -1
+            img = img.copy()
+                
         img = torch.from_numpy(img.transpose(2, 0, 1)).float()
 
-        return img[3:6, :, :]
+        return img

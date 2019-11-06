@@ -22,7 +22,7 @@ def resize_and_convert(img, size, quality=100):
     return img
 
 
-def resize_multiple(img, sizes=(8, 16, 32, 64, 128, 256, 512, 1024), quality=100):
+def resize_multiple(img, sizes=(8, 16, 32, 64, 128, 256), quality=100):
     imgs = []
 
     for size in sizes:
@@ -42,7 +42,7 @@ def resize_worker(img_file, sizes):
     return i, out
 
 
-def prepare(transaction, dataset1, dataset2, n_worker, sizes=(8, 16, 32, 64, 128, 256, 512, 1024)):
+def prepare(transaction, dataset1, dataset2, n_worker, sizes=(8, 16, 32, 64, 128, 256)):
     resize_fn = partial(resize_worker, sizes=sizes)
 
     files = [(i, file1, file2) for i, (file1, file2) in enumerate(zip(dataset1, dataset2))]
@@ -84,8 +84,8 @@ if __name__ == '__main__':
     albedo_ls = "/home/ICT2000/rli/mnt/vgldb1/LightStageFaceDB/Datasets/FaceEncoding/DiffuseAlbedo/*_01_diffuse_albedo.exr"
 
     pointcloud_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/PointCloud_Aligned/Age*-*_01_*_pointcloud.exr"
-#     albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/DiffuseAlbedo/Age*-*_01_*_diffuse_albedo.exr"
-    albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingDataV2/DiffuseAlbedo_sRGB/Age*-*_01_*_diffuse_albedo.exr"
+    albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingData/DiffuseAlbedo/Age*-*_01_*_diffuse_albedo.exr"
+    # albedo_tri = "/home/ICT2000/rli/mnt/vgldb1/InfiniteRealities_Triplegangers/TrainingDataV2/DiffuseAlbedo_sRGB/Age*-*_01_*_diffuse_albedo.exr"
     
     pointcloud_lso = "/home/ICT2000/rli/mnt/vgldb1/OldLightStageDataTransfer/TrainingData/PointCloud_Aligned/*_1_pointcloud.exr"
     albedo_lso = "/home/ICT2000/rli/mnt/vgldb1/OldLightStageDataTransfer/TrainingData/DiffuseAlbedo/*_1_diffuse_albedo.exr"

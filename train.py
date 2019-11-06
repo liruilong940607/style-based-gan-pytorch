@@ -17,6 +17,7 @@ from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator
 
 import imageio
+import time
 
 
 def requires_grad(model, flag=True):
@@ -34,7 +35,7 @@ def accumulate(model1, model2, decay=0.999):
 
 def sample_data(dataset, batch_size, image_size=4):
     dataset.resolution = image_size
-    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=16)
+    loader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=1)
 
     return loader
 
@@ -48,7 +49,7 @@ def adjust_lr(optimizer, lr):
 def calc_region_range(dataset):
     image_size = dataset.resolution
     
-    dataset.resolution = 512
+    dataset.resolution = 256
     data_loader = iter(DataLoader(dataset, shuffle=False, batch_size=16, num_workers=16))
     img = torch.cat([next(data_loader) for _ in range(100)], dim=0)
     img_mean = img.mean(dim=0, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
@@ -91,6 +92,10 @@ def train(args, dataset, generator, discriminator):
     
     img_mean, img_min, img_max = calc_region_range(dataset)
     print (f"[drange] min: {img_min}; max: {img_max}; mean: {img_mean}")
+    img_mean = img_mean.cuda()
+    img_min = img_min.cuda()
+    img_max = img_max.cuda()
+    
     for i in pbar:
         discriminator.zero_grad()
 
@@ -133,20 +138,20 @@ def train(args, dataset, generator, discriminator):
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
             
-
+        tick = time.time()
         try:
             real_image = next(data_loader)
 
         except (OSError, StopIteration):
             data_loader = iter(loader)
             real_image = next(data_loader)
+        tock = time.time()
             
-#         real_image = (real_image - img_mean) / (img_max - img_min + 1e-10)
-
         used_sample += real_image.shape[0]
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
+        real_image = (real_image - img_mean) / (img_max - img_min + 1e-10)
 
         if args.loss == 'wgan-gp':
             real_predict = discriminator(real_image, step=step, alpha=alpha)
@@ -238,7 +243,8 @@ def train(args, dataset, generator, discriminator):
             requires_grad(discriminator, True)
 
         if (i + 1) % 200 == 0:
-            vis_real = exr2rgb(real_image[:16])
+            real_image = real_image * (img_max - img_min + 1e-10) + img_mean
+            vis_real = exr2rgb(real_image[:16, -3:])
 
             utils.save_image(
                 vis_real.data.cpu(),
@@ -248,7 +254,8 @@ def train(args, dataset, generator, discriminator):
                 range=(0, 1),
             )
 
-            vis_fake = exr2rgb(fake_image[:16])
+            fake_image = fake_image * (img_max - img_min + 1e-10) + img_mean
+            vis_fake = exr2rgb(fake_image[:16, -3:])
 
             utils.save_image(
                 vis_fake.data.cpu(),
@@ -258,16 +265,6 @@ def train(args, dataset, generator, discriminator):
                 range=(0, 1),
             )
             
-#             gen_i, gen_j = 1, 1
-#             latent_code = torch.randn(gen_j, code_size).cuda()
-#             with torch.no_grad():
-#                 for idx in range(gen_i):
-#                     image = g_running(
-#                         latent_code, step=step, alpha=alpha
-#                     ).data.cpu().numpy()[0].transpose(1, 2, 0)
-# #                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 0:3], format='EXR-FI')
-#                     imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 0:3], format='EXR-FI')
-                    
 
         if (i + 1) % 1000 == 0:
             torch.save(
@@ -284,14 +281,14 @@ def train(args, dataset, generator, discriminator):
 
         state_msg = (
             f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}'
+            f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}; Data: {tock-tick:.3f}'
         )
 
         pbar.set_description(state_msg)
 
 
 if __name__ == '__main__':
-    code_size = 512
+    code_size = 1024
     batch_size = 16
     n_critic = 1
 
@@ -304,10 +301,10 @@ if __name__ == '__main__':
         default=600_000,
         help='number of samples used for each training phases',
     )
-    parser.add_argument('--lr', default=0.004, type=float, help='learning rate')
+    parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', help='use lr scheduling')
     parser.add_argument('--init_size', default=8, type=int, help='initial image size')
-    parser.add_argument('--max_size', default=1024, type=int, help='max image size')
+    parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
     )
@@ -372,13 +369,13 @@ if __name__ == '__main__':
     dataset = MultiResolutionDataset(args.path, transform, args.init_size)
 
     if args.sched:
-        # args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
-        # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
+        args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
+        args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
         
-        # 4gpu
-        args.lr = {128: 0.006, 256: 0.008, 512: 0.012, 1024: 0.012}
-        args.batch = {4: 512, 8: 1024, 16: 512, 32: 128, 64: 64, 128: 32, 256: 32}
-        args.phase = 600_000
+#         # 4gpu
+#         args.lr = {128: 0.06, 256: 0.08}
+#         args.batch = {4: 1024, 8: 1024, 16: 512, 32: 128, 64: 64, 128: 32, 256: 32}
+#         args.phase = 1200_000
 
     else:
         args.lr = {}
