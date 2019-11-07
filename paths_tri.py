@@ -60,6 +60,9 @@ class Dataset(object):
         albedo = load_img(albedo_file)
         pointcloud = load_img(pointcloud_file)
         
+        if isnan(albedo):
+            return self.__getitem__(index + 1)
+            
         resolution = self.resolution
         if albedo.shape[0] != resolution:
             albedo = cv2.resize(albedo, (resolution, resolution), interpolation=cv2.INTER_CUBIC)
@@ -92,7 +95,8 @@ class Dataset(object):
             name = pointcloud.split("/")[-1].split("_pointcloud.exr")[0]
             pointcloud_augs = glob.glob(osp(folder_pointcloud_aug, 
                                         f"{name}_blendshape_iter_*_pointcloud.exr"))
-            pointcloud = random.choice(pointcloud_augs)
+            if len(pointcloud_augs) > 0:
+                pointcloud = random.choice(pointcloud_augs)
             
         assert os.path.exists(albedo)
         assert os.path.exists(pointcloud)

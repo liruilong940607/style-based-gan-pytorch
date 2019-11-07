@@ -35,7 +35,9 @@ def save_mat(filename_out, data, key, skip_if_exist=False):
     os.makedirs(os.path.dirname(filename_out), exist_ok=True)
     scipy.io.savemat(filename_out, {key: data})
 
-    
+def isnan(x):
+    return (x != x).any()
+
 #############################################################
 # Specific Utils
 #############################################################
