@@ -57,7 +57,7 @@ def exr2rgb(tensor):
     return (tensor*12.92) * (tensor<=0.0031308).float() + (1.055*(tensor**(1.0/2.4))-0.055) * (tensor>0.0031308).float()
     
         
-def train(args, dataset, generator, discriminator, monitor):
+def train(args, dataset, generator, discriminator, discriminatorPC, discriminatorAl, monitor):
     requires_grad(monitor, False)
     
     step = int(math.log2(args.init_size)) - 2
@@ -74,6 +74,8 @@ def train(args, dataset, generator, discriminator, monitor):
 
     requires_grad(generator, False)
     requires_grad(discriminator, True)
+    requires_grad(discriminatorPC, True)
+    requires_grad(discriminatorAl, True)
 
     disc_loss_val = 0
     gen_loss_val = 0
@@ -89,6 +91,8 @@ def train(args, dataset, generator, discriminator, monitor):
     print (f"[drange] min: {img_min}; max: {img_max}; mean: {img_mean}")
     for i in pbar:
         discriminator.zero_grad()
+        discriminatorPC.zero_grad()
+        discriminatorAl.zero_grad()
 
         alpha = min(1, 1 / args.phase * (used_sample + 1))
 
@@ -119,8 +123,12 @@ def train(args, dataset, generator, discriminator, monitor):
                 {
                     'generator': generator.module.state_dict(),
                     'discriminator': discriminator.module.state_dict(),
+                    'discriminatorPC': discriminatorPC.module.state_dict(),
+                    'discriminatorAl': discriminatorAl.module.state_dict(),
                     'g_optimizer': g_optimizer.state_dict(),
                     'd_optimizer': d_optimizer.state_dict(),
+                    'd_optimizerPC': d_optimizerPC.state_dict(),
+                    'd_optimizerAl': d_optimizerAl.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
                 f'checkpoint/train_step-{ckpt_step}.model',
@@ -150,6 +158,14 @@ def train(args, dataset, generator, discriminator, monitor):
             real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
             (-real_predict).backward()
+            
+            real_predictPC = discriminatorPC(real_image[:, 3:6], step=step, alpha=alpha)
+            real_predictPC = real_predictPC.mean() - 0.001 * (real_predictPC ** 2).mean()
+            (-real_predictPC).backward()
+            
+            real_predictAl = discriminatorAl(real_image[:, 0:3], step=step, alpha=alpha)
+            real_predictAl = real_predictAl.mean() - 0.001 * (real_predictAl ** 2).mean()
+            (-real_predictAl).backward()
 
         elif args.loss == 'r1':
             real_image.requires_grad = True
@@ -192,10 +208,16 @@ def train(args, dataset, generator, discriminator, monitor):
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
+        fake_predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
+        fake_predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
 
         if args.loss == 'wgan-gp':
             fake_predict = fake_predict.mean()
             fake_predict.backward()
+            fake_predictPC = fake_predictPC.mean()
+            fake_predictPC.backward()
+            fake_predictAl = fake_predictAl.mean()
+            fake_predictAl.backward()
 
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
@@ -211,6 +233,36 @@ def train(args, dataset, generator, discriminator, monitor):
             grad_penalty.backward()
             grad_loss_val = grad_penalty.item()
             disc_loss_val = (real_predict - fake_predict).item()
+            
+            eps = torch.rand(b_size, 1, 1, 1).cuda()
+            x_hat = eps * real_image.data + (1 - eps) * fake_image.data
+            x_hat.requires_grad = True
+            hat_predict = discriminatorPC(x_hat[:, 3:6], step=step, alpha=alpha)
+            grad_x_hat = grad(
+                outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
+            )[0]
+            grad_penalty = (
+                (grad_x_hat.view(grad_x_hat.size(0), -1).norm(2, dim=1) - 1) ** 2
+            ).mean()
+            grad_penalty = 10 * grad_penalty
+            grad_penalty.backward()
+            grad_loss_valPC = grad_penalty.item()
+            disc_loss_valPC = (real_predictPC - fake_predictPC).item()
+            
+            eps = torch.rand(b_size, 1, 1, 1).cuda()
+            x_hat = eps * real_image.data + (1 - eps) * fake_image.data
+            x_hat.requires_grad = True
+            hat_predict = discriminatorAl(x_hat[:, 0:3], step=step, alpha=alpha)
+            grad_x_hat = grad(
+                outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
+            )[0]
+            grad_penalty = (
+                (grad_x_hat.view(grad_x_hat.size(0), -1).norm(2, dim=1) - 1) ** 2
+            ).mean()
+            grad_penalty = 10 * grad_penalty
+            grad_penalty.backward()
+            grad_loss_valAl = grad_penalty.item()
+            disc_loss_valAl = (real_predictAl - fake_predictAl).item()
 
         elif args.loss == 'r1':
             fake_predict = F.softplus(fake_predict).mean()
@@ -218,16 +270,22 @@ def train(args, dataset, generator, discriminator, monitor):
             disc_loss_val = (real_predict + fake_predict).item()
 
         d_optimizer.step()
+        d_optimizerPC.step()
+        d_optimizerAl.step()
 
         if (i + 1) % n_critic == 0:
             generator.zero_grad()
 
             requires_grad(generator, True)
             requires_grad(discriminator, False)
+            requires_grad(discriminatorPC, False)
+            requires_grad(discriminatorAl, False)
 
             fake_image = generator(gen_in2, fake_label2, step=step, alpha=alpha)
 
             predict = discriminator(fake_image, step=step, alpha=alpha)
+            predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
+            predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
 
 #             # monitor
 #             age_predict, gender_predict = monitor(fake_image, step=step, alpha=1.0)
@@ -237,12 +295,14 @@ def train(args, dataset, generator, discriminator, monitor):
             
             if args.loss == 'wgan-gp':
                 loss_weight = 0
-                loss = -predict.mean() #+ (loss_age + loss_gender) * loss_weight
+                loss = -predict.mean() -predictPC.mean() -predictAl.mean() #+ (loss_age + loss_gender) * loss_weight
 
             elif args.loss == 'r1':
                 loss = F.softplus(-predict).mean()
 
             gen_loss_val = -predict.mean().item()
+            gen_loss_valPC = -predictPC.mean().item()
+            gen_loss_valAl = -predictAl.mean().item()
 
             loss.backward()
             g_optimizer.step()
@@ -250,8 +310,10 @@ def train(args, dataset, generator, discriminator, monitor):
 
             requires_grad(generator, False)
             requires_grad(discriminator, True)
+            requires_grad(discriminatorPC, True)
+            requires_grad(discriminatorAl, True)
 
-        if (i + 1) % 200 == 0:
+        if (i + 1) % 100 == 0:
             real_image = real_image * (img_max.cuda() - img_min.cuda() + 1e-10) + img_mean.cuda()
             
             vis_real = exr2rgb(real_image[:16, 0:3])
@@ -286,8 +348,12 @@ def train(args, dataset, generator, discriminator, monitor):
                 {
                     'generator': generator.module.state_dict(),
                     'discriminator': discriminator.module.state_dict(),
+                    'discriminatorPC': discriminatorPC.module.state_dict(),
+                    'discriminatorAl': discriminatorAl.module.state_dict(),
                     'g_optimizer': g_optimizer.state_dict(),
                     'd_optimizer': d_optimizer.state_dict(),
+                    'd_optimizerPC': d_optimizerPC.state_dict(),
+                    'd_optimizerAl': d_optimizerAl.state_dict(),
                     'g_running': g_running.state_dict(),
                 },
                 f'checkpoint/train_resolution{resolution}_{loss_weight}xMonitor_iter-{i}.model',
@@ -295,8 +361,10 @@ def train(args, dataset, generator, discriminator, monitor):
 
 
         state_msg = (
-            f'Size: {4 * 2 ** step}; G: {gen_loss_val:.3f}; D: {disc_loss_val:.3f};'
-            f' Grad: {grad_loss_val:.3f}; Alpha: {alpha:.5f}'
+            f'Size: {4 * 2 ** step}; Alpha: {alpha:.2f}'
+            f' G: {gen_loss_val:.2f}; D: {disc_loss_val:.2f}; Grad: {grad_loss_val:.2f}; '
+            f' GPC: {gen_loss_valPC:.2f}; DPC: {disc_loss_valPC:.2f}; GradPC: {grad_loss_valPC:.2f}; '
+            f' GAl: {gen_loss_valAl:.2f}; DAl: {disc_loss_valAl:.2f}; GradAl: {grad_loss_valAl:.2f}; '
             #f' Age: {loss_age.item():.3f}; Gender: {loss_gender.item():.3f};'
         )
 
@@ -318,7 +386,7 @@ if __name__ == '__main__':
     )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', help='use lr scheduling')
-    parser.add_argument('--init_size', default=64, type=int, help='initial image size')
+    parser.add_argument('--init_size', default=256, type=int, help='initial image size')
     parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
@@ -349,6 +417,13 @@ if __name__ == '__main__':
         Discriminator(from_rgb_activate=not args.no_from_rgb_activate, in_channel=6)
     ).cuda()
     
+    discriminatorPC = nn.DataParallel(
+        Discriminator(from_rgb_activate=not args.no_from_rgb_activate, in_channel=3)
+    ).cuda()
+    discriminatorAl = nn.DataParallel(
+        Discriminator(from_rgb_activate=not args.no_from_rgb_activate, in_channel=3)
+    ).cuda()
+    
     monitor = nn.DataParallel(Monitor(from_rgb_activate=True, in_channel=6)).cuda()
     ckpt = torch.load(args.ckptExp)
     monitor.module.load_state_dict(ckpt['model'])
@@ -367,6 +442,8 @@ if __name__ == '__main__':
         }
     )
     d_optimizer = optim.Adam(discriminator.parameters(), lr=args.lr, betas=(0.0, 0.99))
+    d_optimizerPC = optim.Adam(discriminatorPC.parameters(), lr=args.lr, betas=(0.0, 0.99))
+    d_optimizerAl = optim.Adam(discriminatorAl.parameters(), lr=args.lr, betas=(0.0, 0.99))
 
     accumulate(g_running, generator.module, 0)
 
@@ -385,13 +462,13 @@ if __name__ == '__main__':
         args.lr = {128: 0.0015, 256: 0.002, 512: 0.003, 1024: 0.003}
         # args.batch = {4: 512, 8: 256, 16: 128, 32: 64, 64: 32, 128: 32, 256: 32}
         
-        # 2 GPU
-        args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 64, 128: 32, 256: 16}
-        args.phase = 600_000
+#         # 2 GPU
+#         args.batch = {4: 1024, 8: 512, 16: 256, 32: 128, 64: 32, 128: 32, 256: 16}
+#         args.phase = 600_000
 
-#         # 4 GPU
-#         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 128, 128: 128, 256: 128}
-#         args.phase = 1200_000
+        # 4 GPU
+        args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 64, 128: 64, 256: 32}
+        args.phase = 600_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
@@ -409,4 +486,4 @@ if __name__ == '__main__':
 
     args.batch_default = 16
 
-    train(args, dataset, generator, discriminator, monitor)
+    train(args, dataset, generator, discriminator, discriminatorPC, discriminatorAl, monitor)
