@@ -27,7 +27,7 @@ import cv2
 def train_monitorExp(model, resolution, batch_size):
     step = int(math.log2(resolution)) - 2
     
-    optimizer = optim.Adam(model.parameters(), lr=0.01, betas=(0.0, 0.99))
+    optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.0, 0.99))
     L1loss = nn.L1Loss()
     MSEloss = nn.MSELoss()
     CEloss = nn.CrossEntropyLoss()
