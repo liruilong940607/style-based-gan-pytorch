@@ -66,7 +66,7 @@ class MultiResolutionDataset():
         
         image = torch.cat([albedo, pointcloud], dim=0).float()
         
-        return image, age.float(), gender.long()
+        return image, age.view(-1).float(), gender.long()
     
     def sample_label(self, k=1, randn=True):
         # return [k * label_size]

@@ -356,6 +356,16 @@ class StyledConvBlock(nn.Module):
         self.noise2 = equal_lr(NoiseInjection(out_channel))
         self.adain2 = AdaptiveInstanceNorm(out_channel, style_dim)
         self.lrelu2 = nn.LeakyReLU(0.2)
+        
+        self.conv3 = EqualConv2d(out_channel, out_channel, kernel_size, padding=padding)
+        self.noise3 = equal_lr(NoiseInjection(out_channel))
+        self.adain3 = AdaptiveInstanceNorm(out_channel, style_dim)
+        self.lrelu3 = nn.LeakyReLU(0.2)
+        
+        self.conv4 = EqualConv2d(out_channel, out_channel, kernel_size, padding=padding)
+        self.noise4 = equal_lr(NoiseInjection(out_channel))
+        self.adain4 = AdaptiveInstanceNorm(out_channel, style_dim)
+        self.lrelu4 = nn.LeakyReLU(0.2)
 
     def forward(self, input, style, noise):
         out = self.conv1(input)
@@ -367,6 +377,16 @@ class StyledConvBlock(nn.Module):
         out = self.noise2(out, noise)
         out = self.lrelu2(out)
         out = self.adain2(out, style)
+        
+        out = self.conv3(out)
+        out = self.noise3(out, noise)
+        out = self.lrelu3(out)
+        out = self.adain3(out, style)
+        
+        out = self.conv4(out)
+        out = self.noise4(out, noise)
+        out = self.lrelu4(out)
+        out = self.adain4(out, style)
 
         return out
 
@@ -452,14 +472,19 @@ class Generator(nn.Module):
 
 
 class StyledGenerator(nn.Module):
-    def __init__(self, code_dim=512, n_mlp=8, out_channel=3):
+    def __init__(self, code_dim=512, n_mlp=8, out_channel=6, label_dim=3):
         super().__init__()
 
         self.generator = Generator(code_dim, out_channel=out_channel)
 
-        layers = [PixelNorm()]
+        self.input = PixelNorm()
+
+        layers = []
         for i in range(n_mlp):
-            layers.append(EqualLinear(code_dim, code_dim))
+            if i == 0 and label_dim > 0:
+                layers.append(EqualLinear(code_dim + label_dim, code_dim))
+            else:
+                layers.append(EqualLinear(code_dim, code_dim))
             layers.append(nn.LeakyReLU(0.2))
 
         self.style = nn.Sequential(*layers)
@@ -467,6 +492,7 @@ class StyledGenerator(nn.Module):
     def forward(
         self,
         input,
+        label,
         noise=None,
         step=0,
         alpha=-1,
@@ -479,6 +505,7 @@ class StyledGenerator(nn.Module):
             input = [input]
 
         for i in input:
+            i = torch.cat([self.input(i), label * 0], dim=1)
             styles.append(self.style(i))
 
         batch = input[0].shape[0]
