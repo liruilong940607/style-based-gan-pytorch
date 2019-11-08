@@ -89,6 +89,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
     
     img_mean, img_min, img_max = load_region_range()
     print (f"[drange] min: {img_min}; max: {img_max}; mean: {img_mean}")
+    mask = dataset.mask_multires[resolution].unsqueeze(0).cuda()
     for i in pbar:
         discriminator.zero_grad()
         discriminatorPC.zero_grad()
@@ -136,7 +137,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
 
             adjust_lr(g_optimizer, args.lr.get(resolution, 0.001))
             adjust_lr(d_optimizer, args.lr.get(resolution, 0.001))
-            
+            mask = dataset.mask_multires[resolution].unsqueeze(0).cuda()
 
         try:
             real_image, real_label_age, real_label_gender = next(data_loader)
@@ -153,7 +154,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
-
+        real_image = real_image * mask
         if args.loss == 'wgan-gp':
             real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
@@ -207,6 +208,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
         fake_label2 = torch.cat([fake_label_age2, F.one_hot(fake_label_gender2).float()], dim=1)
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
+        fake_image = fake_image * mask
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
         fake_predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
         fake_predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
@@ -222,6 +224,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
+            x_hat = x_hat * mask
             hat_predict = discriminator(x_hat, step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
@@ -237,6 +240,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
+            x_hat = x_hat * mask
             hat_predict = discriminatorPC(x_hat[:, 3:6], step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
@@ -252,6 +256,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             eps = torch.rand(b_size, 1, 1, 1).cuda()
             x_hat = eps * real_image.data + (1 - eps) * fake_image.data
             x_hat.requires_grad = True
+            x_hat = x_hat * mask
             hat_predict = discriminatorAl(x_hat[:, 0:3], step=step, alpha=alpha)
             grad_x_hat = grad(
                 outputs=hat_predict.sum(), inputs=x_hat, create_graph=True
@@ -282,7 +287,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             requires_grad(discriminatorAl, False)
 
             fake_image = generator(gen_in2, fake_label2, step=step, alpha=alpha)
-
+            fake_image = fake_image * mask
             predict = discriminator(fake_image, step=step, alpha=alpha)
             predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
             predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
@@ -386,7 +391,7 @@ if __name__ == '__main__':
     )
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('--sched', action='store_true', help='use lr scheduling')
-    parser.add_argument('--init_size', default=256, type=int, help='initial image size')
+    parser.add_argument('--init_size', default=8, type=int, help='initial image size')
     parser.add_argument('--max_size', default=256, type=int, help='max image size')
     parser.add_argument(
         '--ckpt', default=None, type=str, help='load from previous checkpoints'
@@ -468,7 +473,7 @@ if __name__ == '__main__':
 
         # 4 GPU
         args.batch = {4: 2048, 8: 1024, 16: 512, 32: 256, 64: 64, 128: 64, 256: 32}
-        args.phase = 600_000
+        args.phase = 300_000
         
 #         # 6 GPU
 #         args.batch = {4: 3072, 8: 1536, 16: 768, 32: 384, 64: 192, 128: 192, 256: 192}
