@@ -57,11 +57,12 @@ def random_flip(tensor):
     else:
         albedo = tensor[:, 0:3, :, :]
         
-    if random.random() < 0.5:
-        pointcloud = tensor[:, 3:6, :, inv_idx]
-        pointcloud = pointcloud * torch.tensor([[[[-1.0]], [[1.0]], [[1.0]]]], dtype=pointcloud.dtype).cuda()
-    else:
-        pointcloud = tensor[:, 3:6, :, :]
+#     if random.random() < 0.5:
+#         pointcloud = tensor[:, 3:6, :, inv_idx]
+#         pointcloud = pointcloud * torch.tensor([[[[-1.0]], [[1.0]], [[1.0]]]], dtype=pointcloud.dtype).cuda()
+#     else:
+#         pointcloud = tensor[:, 3:6, :, :]
+    pointcloud = tensor[:, 3:6, :, :]
     
     tensor = torch.cat([albedo, pointcloud], dim=1)
     return tensor
