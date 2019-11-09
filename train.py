@@ -17,7 +17,8 @@ from dataset import MultiResolutionDataset
 from model import StyledGenerator, Discriminator, Monitor
 
 import imageio
-
+import random
+from utils import *
 
 def requires_grad(model, flag=True):
     for p in model.parameters():
@@ -43,18 +44,27 @@ def adjust_lr(optimizer, lr):
     for group in optimizer.param_groups:
         mult = group.get('mult', 1)
         group['lr'] = lr * mult
-
-        
-def load_region_range():
-    norm_data = torch.load("./norm_data.data")
-    img_mean = norm_data["img_mean"]
-    img_min = norm_data["img_min"]
-    img_max = norm_data["img_max"]
-    return img_mean, img_min, img_max
     
         
 def exr2rgb(tensor):
     return (tensor*12.92) * (tensor<=0.0031308).float() + (1.055*(tensor**(1.0/2.4))-0.055) * (tensor>0.0031308).float()
+    
+    
+def random_flip(tensor):
+    inv_idx = torch.arange(tensor.size(3)-1, -1, -1).long().cuda()
+    if random.random() < 0.5:
+        albedo = tensor[:, 0:3, :, inv_idx]
+    else:
+        albedo = tensor[:, 0:3, :, :]
+        
+    if random.random() < 0.5:
+        pointcloud = tensor[:, 3:6, :, inv_idx]
+        pointcloud = pointcloud * torch.tensor([[[[-1.0]], [[1.0]], [[1.0]]]], dtype=pointcloud.dtype).cuda()
+    else:
+        pointcloud = tensor[:, 3:6, :, :]
+    
+    tensor = torch.cat([albedo, pointcloud], dim=1)
+    return tensor
     
         
 def train(args, dataset, generator, discriminator, discriminatorPC, discriminatorAl, monitor):
@@ -87,8 +97,9 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = False
     
-    img_mean, img_min, img_max = load_region_range()
-    print (f"[drange] min: {img_min}; max: {img_max}; mean: {img_mean}")
+    mean = dataset.mean.cuda().unsqueeze(0)
+    std = dataset.std.cuda().unsqueeze(0)
+    
     mask = dataset.mask_multires[resolution].unsqueeze(0).cuda()
     for i in pbar:
         discriminator.zero_grad()
@@ -148,13 +159,12 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             real_image, real_label_age, real_label_gender = next(data_loader)
             real_label = torch.cat([real_label_age, F.one_hot(real_label_gender).float()], dim=1)
             
-        real_image = (real_image - img_mean) / (img_max - img_min + 1e-10)
-
         used_sample += real_image.shape[0]
 
         b_size = real_image.size(0)
         real_image = real_image.cuda()
         real_image = real_image * mask
+        real_image = random_flip(real_image)
         if args.loss == 'wgan-gp':
             real_predict = discriminator(real_image, step=step, alpha=alpha)
             real_predict = real_predict.mean() - 0.001 * (real_predict ** 2).mean()
@@ -209,6 +219,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             
         fake_image = generator(gen_in1, fake_label1, step=step, alpha=alpha)
         fake_image = fake_image * mask
+        fake_image = random_flip(fake_image)
         fake_predict = discriminator(fake_image, step=step, alpha=alpha)
         fake_predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
         fake_predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
@@ -288,6 +299,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
 
             fake_image = generator(gen_in2, fake_label2, step=step, alpha=alpha)
             fake_image = fake_image * mask
+            fake_image = random_flip(fake_image)
             predict = discriminator(fake_image, step=step, alpha=alpha)
             predictPC = discriminatorPC(fake_image[:, 3:6], step=step, alpha=alpha)
             predictAl = discriminatorAl(fake_image[:, 0:3], step=step, alpha=alpha)
@@ -311,41 +323,62 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
 
             loss.backward()
             g_optimizer.step()
-            accumulate(g_running, generator.module, 0)
+            accumulate(g_running, generator.module)
 
             requires_grad(generator, False)
             requires_grad(discriminator, True)
             requires_grad(discriminatorPC, True)
             requires_grad(discriminatorAl, True)
 
-        if (i + 1) % 100 == 0:
-            real_image = real_image * (img_max.cuda() - img_min.cuda() + 1e-10) + img_mean.cuda()
+        if (i + 1) % 200 == 0:
+            real_image = (real_image * std + mean) * mask
+            real_image = real_image.data.cpu()
+            real_image[:, 3:6] += dataset.mean_pc_multires[resolution]
             
             vis_real = exr2rgb(real_image[:16, 0:3])
-
             utils.save_image(
-                vis_real.data.cpu(),
-                f'sample/{str(i + 1).zfill(6)}-real_image.jpg',
+                vis_real,
+                f'sample2/{str(i + 1).zfill(6)}-albedo-real_image.jpg',
+                nrow=4,
+                normalize=True,
+                range=(0, 1),
+            )
+            vis_real = exr2rgb(real_image[:16, 3:6])
+            utils.save_image(
+                vis_real,
+                f'sample2/{str(i + 1).zfill(6)}-pointcloud-real_image.jpg',
                 nrow=4,
                 normalize=True,
                 range=(0, 1),
             )
             
-            fake_image = fake_image * (img_max.cuda() - img_min.cuda() + 1e-10) + img_mean.cuda()
-
+#             fake_image = g_running(gen_in2, fake_label2, step=step, alpha=alpha)
+            fake_image = (fake_image * mean + std) * mask
+            fake_image = fake_image.data.cpu()
+            fake_image[:, 3:6] += dataset.mean_pc_multires[resolution]
+        
             vis_fake = exr2rgb(fake_image[:16, 0:3])
-
             utils.save_image(
-                vis_fake.data.cpu(),
-                f'sample/{str(i + 1).zfill(6)}-fake_image.jpg',
+                vis_fake,
+                f'sample2/{str(i + 1).zfill(6)}-albedo-fake_image.jpg',
+                nrow=4,
+                normalize=True,
+                range=(0, 1),
+            )
+            vis_fake = exr2rgb(fake_image[:16, 3:6])
+            utils.save_image(
+                vis_fake,
+                f'sample2/{str(i + 1).zfill(6)}-pointcloud-fake_image.jpg',
                 nrow=4,
                 normalize=True,
                 range=(0, 1),
             )
             
             image = fake_image.data.cpu().numpy()[0].transpose(1, 2, 0)
-            imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-pointcloud.exr', image[:, :, 3:6], format='EXR-FI')
-            imageio.imwrite(f'sample/{str(i + 1).zfill(6)}-albedo.exr', image[:, :, 0:3], format='EXR-FI')
+            imageio.imwrite(f'sample2/{str(i + 1).zfill(6)}-pointcloud.exr', 
+                            image[:, :, 3:6], format='EXR-FI')
+            imageio.imwrite(f'sample2/{str(i + 1).zfill(6)}-albedo.exr', 
+                            image[:, :, 0:3], format='EXR-FI')
                     
 
         if (i + 1) % 1000 == 0:
@@ -457,9 +490,13 @@ if __name__ == '__main__':
 
         generator.module.load_state_dict(ckpt['generator'])
         discriminator.module.load_state_dict(ckpt['discriminator'])
+        discriminatorPC.module.load_state_dict(ckpt['discriminatorPC'])
+        discriminatorAl.module.load_state_dict(ckpt['discriminatorAl'])
         g_running.load_state_dict(ckpt['g_running'])
         g_optimizer.load_state_dict(ckpt['g_optimizer'])
         d_optimizer.load_state_dict(ckpt['d_optimizer'])
+        d_optimizerPC.load_state_dict(ckpt['d_optimizerPC'])
+        d_optimizerAl.load_state_dict(ckpt['d_optimizerAl'])
 
     dataset = MultiResolutionDataset(args.init_size)
 

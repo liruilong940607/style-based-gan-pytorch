@@ -291,7 +291,7 @@ class NoiseInjection(nn.Module):
         self.weight = nn.Parameter(torch.zeros(1, channel, 1, 1))
 
     def forward(self, image, noise):
-        return image + self.weight * noise
+        return image + self.weight * noise 
 
 
 class ConstantInput(nn.Module):
