@@ -93,7 +93,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
     grad_loss_val = 0
 
     alpha = 0
-    used_sample = 0
+    used_sample = 300_000
 
     max_step = int(math.log2(args.max_size)) - 2
     final_progress = False
@@ -354,7 +354,7 @@ def train(args, dataset, generator, discriminator, discriminatorPC, discriminato
             )
             
 #             fake_image = g_running(gen_in2, fake_label2, step=step, alpha=alpha)
-            fake_image = (fake_image * mean + std) * mask
+            fake_image = (fake_image * std + mean) * mask
             fake_image = fake_image.data.cpu()
             fake_image[:, 3:6] += dataset.mean_pc_multires[resolution]
         
