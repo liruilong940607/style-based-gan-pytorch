@@ -5,6 +5,9 @@ import cv2
 import scipy.io
 import numpy as np
 
+def exr2rgb(tensor):
+    return (tensor*12.92) * (tensor<=0.0031308).float() + (1.055*(tensor**(1.0/2.4))-0.055) * (tensor>0.0031308).float()
+    
 
 #############################################################
 # Common Utils
@@ -23,7 +26,11 @@ def save_img(filename_out, img, skip_if_exist=False):
     if skip_if_exist and os.path.exists(filename_out):
         return
     os.makedirs(os.path.dirname(filename_out), exist_ok=True)
-    imageio.imwrite(filename_out, img, format='EXR-FI')
+    if filename_out.split('.')[-1] == "exr":
+        imageio.imwrite(filename_out, img, format='EXR-FI')
+    else:
+        img = np.uint8(exr2rgb(img))
+        imageio.imwrite(filename_out, img)
 
     
 def load_mat(filename, key):

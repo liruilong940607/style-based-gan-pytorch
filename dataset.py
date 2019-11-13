@@ -51,6 +51,12 @@ class MultiResolutionDataset():
             ).float()
             
         self.mean, self.std = self.load_mean()
+        
+        # gender & age
+        self.mean_gender = 0.5
+        self.std_gender = 0.5
+        self.mean_age = 32.5841
+        self.std_age = 13.9430
             
     def calc_mean(self, save=False):
         loader = DataLoader(self, shuffle=False, batch_size=32, num_workers=16)
@@ -104,7 +110,11 @@ class MultiResolutionDataset():
         image = torch.cat([albedo, pointcloud], dim=0).float()
         image = (image - self.mean) / self.std
         
-        return image, age.view(-1).float(), gender.long()
+        gender = gender.float()
+        gender = (gender - self.mean_gender) / self.std_gender
+        age = (age - self.mean_age) / self.std_age
+        
+        return image, age.view(-1).float(), gender.view(-1).float()
     
     def sample_label(self, k=1, randn=True):
         # return [k * label_size]

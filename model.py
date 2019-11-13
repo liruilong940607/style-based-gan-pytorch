@@ -449,7 +449,7 @@ class Generator(nn.Module):
 
                 else:
                     style_step = style[0]
-
+                    
             if i > 0 and step > 0:
                 out_prev = out
 
@@ -492,22 +492,26 @@ class StyledGenerator(nn.Module):
     def forward(
         self,
         input,
-        label,
+        label=None,
         noise=None,
         step=0,
         alpha=-1,
         mean_style=None,
         style_weight=0,
-        mixing_range=(-1, -1),
+        mixing_range=(-1, -1)
     ):
+        
         styles = []
         if type(input) not in (list, tuple):
             input = [input]
+            
+        if label is None:
+            label = torch.zeros((input[0].size(0), 3), dtype=input[0].dtype).to(input[0].device)
 
         for i in input:
             i = torch.cat([self.input(i), label * 0], dim=1)
             styles.append(self.style(i))
-
+            
         batch = input[0].shape[0]
 
         if noise is None:
@@ -525,12 +529,17 @@ class StyledGenerator(nn.Module):
 
             styles = styles_norm
 
+        
         return self.generator(styles, noise, step, alpha, mixing_range=mixing_range)
-
+    
+    
     def mean_style(self, input):
+        label = torch.zeros((input.size(0), 3), dtype=input.dtype).to(input.device)
+        input = torch.cat([self.input(input), label * 0], dim=1)
         style = self.style(input).mean(0, keepdim=True)
 
         return style
+    
 
 
 class Discriminator(nn.Module):
@@ -650,7 +659,7 @@ class Monitor(nn.Module):
 
         self.n_layer = len(self.progression)
 
-        self.linear_gender = EqualLinear(512, 2)
+        self.linear_gender = EqualLinear(512, 1)
         self.linear_age = EqualLinear(512, 1)
 
     def forward(self, input, step=0, alpha=-1):
