@@ -498,28 +498,31 @@ class StyledGenerator(nn.Module):
         alpha=-1,
         mean_style=None,
         style_weight=0,
-        mixing_range=(-1, -1)
+        mixing_range=(-1, -1),
+        input_style=None,
     ):
-        
         styles = []
-        if type(input) not in (list, tuple):
-            input = [input]
-            
-        if label is None:
-            label = torch.zeros((input[0].size(0), 3), dtype=input[0].dtype).to(input[0].device)
+        if input_style is None:
+            if type(input) not in (list, tuple):
+                input = [input]
 
-        for i in input:
-            i = torch.cat([self.input(i), label * 0], dim=1)
-            styles.append(self.style(i))
+            if label is None:
+                label = torch.zeros((input[0].size(0), 3), dtype=input[0].dtype).to(input[0].device)
+
+            for i in input:
+                i = torch.cat([self.input(i), label * 0], dim=1)
+                styles.append(self.style(i))
+        else:
+            styles = [input_style]
             
-        batch = input[0].shape[0]
+        batch = styles[0].shape[0]
 
         if noise is None:
             noise = []
 
             for i in range(step + 1):
                 size = 4 * 2 ** i
-                noise.append(torch.randn(batch, 1, size, size, device=input[0].device))
+                noise.append(torch.randn(batch, 1, size, size, device=styles[0].device))
 
         if mean_style is not None:
             styles_norm = []

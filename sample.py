@@ -21,14 +21,14 @@ def save_result(tensor, z, folder, ids, age=None, gender=None):
                        f'{folder}/{id}.pkl')
         utils.save_image(
             exr2rgb(img[3:6]),
-            f'{folder}/{id}_pointcloud.jpg',
+            f'{folder}/{id}_pointcloud.png',
             nrow=1,
             normalize=True,
             range=(0, 1),
         )
         utils.save_image(
             exr2rgb(img[0:3]),
-            f'{folder}/{id}_albedo.jpg',
+            f'{folder}/{id}_albedo.png',
             nrow=1,
             normalize=True,
             range=(0, 1),
@@ -71,15 +71,16 @@ def get_mean_style(generator, device):
     return mean_style
 
 @torch.no_grad()
-def sample(generator, step, mean_style, n_sample, device, style_weight=0.7, z=None):
-    if z is None:
-        z = torch.randn(n_sample, 512).to(device)
+def sample(generator, step, mean_style, n_sample, device, style_weight=0.7, z=None, input_style=None):
+    if input_style is None and z is None:
+            z = torch.randn(n_sample, 512).to(device)
     image = generator(
         z,
         step=step,
         alpha=1,
         mean_style=mean_style,
         style_weight=style_weight,
+        input_style=input_style,
     )
     
     return image, z
@@ -132,6 +133,13 @@ class Processor():
         self.mean_age = dataset.mean_age
         self.std_age = dataset.std_age
         
+    def forward_age(self, age):
+        age = (age * self.std_age) + self.mean_age
+        return age
+        
+    def forward_gender(self, gender):
+        gender = (gender * self.std_gender) + self.mean_gender
+        return gender
     
     def forward(self, output, z=None, age=None, gender=None):
         output = (output * self.std + self.mean) * self.mask
@@ -144,7 +152,7 @@ class Processor():
             return output, z
 
 @torch.no_grad()
-def get_mean_style_gender(generator, monitor, step, device):
+def get_mean_style_gender(generator, monitor, step, device, processor):
     mean_style_male = []
     mean_style_female = []
 
@@ -157,6 +165,8 @@ def get_mean_style_gender(generator, monitor, step, device):
             alpha=1,
         )
         age, gender = monitor(output, step, alpha=1.0)
+        gender = processor.forward_gender(gender)
+        
         
         if gender < 0.2:
             mean_style_female.append(style)
@@ -172,14 +182,15 @@ def get_mean_style_gender(generator, monitor, step, device):
 
 
 @torch.no_grad()
-def get_mean_style_age(generator, monitor, step, device):
+def get_mean_style_age(generator, monitor, step, device, processor):
     mean_style_age = {}
     counts = {}
-    for age in [30, 50]:#range(20, 81):
+    age_list = [20, 30, 35, 40, 50, 60]
+    for age in age_list:#range(20, 81):
         mean_style_age[age] = []
         counts[age] = 0
     
-    for i in tqdm.tqdm(range(100)):
+    for i in tqdm.tqdm(range(200000)):
         z = torch.randn(1, 512).to(device)
         style = generator.mean_style(z)
         output = generator(
@@ -188,20 +199,17 @@ def get_mean_style_age(generator, monitor, step, device):
             alpha=1,
         )
         age, gender = monitor(output, step, alpha=1.0)
+        age = processor.forward_age(age)
         
         age = age[0].long().item()
-        
-        if age < 30:
-            mean_style_age[30].append(style)
-            counts[30] += 1
-        elif age > 50:
-            mean_style_age[50].append(style)
-            counts[50] += 1
-        else:
-            continue
-    
-    print (counts)
-    for age in [30, 50]:
+        for age_mean in age_list:
+            if age < age_mean + 5 and age > age_mean - 5:
+                mean_style_age[age_mean].append(style)
+                counts[age_mean] += 1
+                break
+                
+        print (counts)
+    for age in age_list:
         mean_style_age[age] = sum(mean_style_age[age]) / counts[age]
         
     return mean_style_age
@@ -211,7 +219,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--size', type=int, default=256, help='size of the image')
     parser.add_argument('--N', type=int, default=10)
-    parser.add_argument('--ckpt', type=str, default="checkpoint/train_resolution256_0xMonitor_iter-10999.model",
+    parser.add_argument('--ckpt', type=str, default="checkpoint/train_resolution256_0xMonitor_iter-13999.model",
                         help='path to checkpoint file')
     parser.add_argument('--ckptMo', type=str, default="checkpoint/train_resolution256_Monitor_iter-19999.model",
                         help='path to checkpoint file')
@@ -280,7 +288,7 @@ if __name__ == '__main__':
 #         save_result(output, z, "./interplation", [i])
 
     # ---- mean gender ----
-#     mean_style_male, mean_style_female = get_mean_style_gender(generator, monitor, step, device)
+#     mean_style_male, mean_style_female = get_mean_style_gender(generator, monitor, step, device, processor)
 #     torch.save({"male": mean_style_male, "female": mean_style_female}, "mean_style_gender.pkl")
     
     # ---- gender sample ----
@@ -324,5 +332,42 @@ if __name__ == '__main__':
 #         save_result(output, None, "./gender_interpolation", [i])
     
     # ---- age
-    mean_style_age = get_mean_style_age(generator, monitor, step, device)
-#     torch.save({"male": mean_style_male, "female": mean_style_female}, "mean_style_gender.pkl")
+#     mean_style_age = get_mean_style_age(generator, monitor, step, device, processor)
+#     torch.save({"age": mean_style_age}, "mean_style_age.pkl")
+
+    # ---- age transfer ---
+    keys =  [20, 60]
+    for key in keys:
+        mean_age = torch.load("mean_style_age.pkl")["age"][key]
+        output1, z1 = processor.forward(*sample(generator, step, mean_age, 1, device, style_weight=0.0))
+        save_result(output1, z1, "./age_interpolation", ["mean_{}".format(key)])
+       
+    z = torch.randn(1, 512).to(device)
+    style_z = generator.mean_style(z)
+    
+    interpolations = []
+    for idx in range(len(keys) - 1):
+        key1 = keys[idx]
+        key2 = keys[idx + 1]
+        mean1 = torch.load("mean_style_age.pkl")["age"][key1]
+        mean2 = torch.load("mean_style_age.pkl")["age"][key2]
+        for i in range(0, 23, 1):
+            mean = mean1 + i/50 * (mean2 - mean1)
+            interpolations.append(mean)
+        for i in range(230, 300, 2):
+            i /= 10.0
+            mean = mean1 + i/50 * (mean2 - mean1)
+            interpolations.append(mean)
+        for i in range(30, 50, 1):
+            mean = mean1 + i/50 * (mean2 - mean1)
+            interpolations.append(mean)
+            
+    cnt = 0
+    for mean_style_age in tqdm.tqdm(interpolations):
+        output, _ = sample(generator, step, style_z, 1, device, style_weight=0.3, input_style=mean_style_age)
+        age, gender = monitor(output, step, alpha=1.0)
+        print (processor.forward_age(age))
+        output = processor.forward(output)[0]
+        save_result(output, None, "./age_interpolation", [cnt])
+        cnt += 1
+    
